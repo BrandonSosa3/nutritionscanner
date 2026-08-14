@@ -1,0 +1,51 @@
+# ── Secrets ───────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ── Personal data — receipts are financial records, never commit one ───────
+data/
+receipts/
+uploads/
+storage/
+backups/
+*.dump
+*.sql.gz
+# Fixture receipts used by tests are redacted + explicitly allowlisted:
+!backend/tests/fixtures/receipts/
+!backend/tests/fixtures/receipts/**
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ── Node / frontend ───────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ── Editors / OS ──────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ── Local scratch ─────────────────────────────────────────────────────────
+scratch/
+tmp/
+*.local
