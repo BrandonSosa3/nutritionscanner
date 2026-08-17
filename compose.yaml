@@ -52,12 +52,20 @@ services:
       USDA_API_KEY: ${USDA_API_KEY:-}
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       LOG_LEVEL: INFO
+      # Alembic's post-write hook runs ruff on generated migrations. Its
+      # default cache location isn't writable by the non-root app user.
+      RUFF_CACHE_DIR: /tmp/.ruff_cache
     ports:
       - "8000:8000"
     volumes:
       # Live reload against the host source in development. The image still
       # contains the code, so production runs without any bind mount.
       - ./backend/src:/app/src:ro
+      # Writable, unlike src: `alembic revision --autogenerate` runs in this
+      # container and must land the generated file on the host. Mounted
+      # read-only, migrations would be written into the container layer and
+      # lost on the next rebuild.
+      - ./backend/alembic:/app/alembic
       - receipt_data:/app/data
     depends_on:
       postgres:
