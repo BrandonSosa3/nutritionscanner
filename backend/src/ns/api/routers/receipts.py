@@ -1,0 +1,128 @@
+"""Receipt endpoints."""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from ns.api.schemas import (
+    ReceiptDetail,
+    ReceiptListResponse,
+    ReceiptSummary,
+    ReceiptUploadResponse,
+)
+from ns.db import get_session
+from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
+from ns.logging import get_logger
+from ns.models import Receipt
+from ns.pipeline.ingest import ingest_receipt
+
+router = APIRouter(prefix="/receipts", tags=["receipts"])
+log = get_logger(__name__)
+
+_CHUNK = 1024 * 1024
+
+
+async def _read_capped(upload: UploadFile) -> bytes:
+    """Read an upload, refusing to buffer more than the image size limit.
+
+    `UploadFile.read()` with no argument would happily pull an arbitrarily
+    large body into memory before any validation runs.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(_CHUNK):
+        total += len(chunk)
+        if total > MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"Image is larger than the {MAX_IMAGE_BYTES // 1_048_576} MB limit. "
+                    "Retake the photo at a lower resolution."
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post(
+    "",
+    response_model=ReceiptUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a receipt photo",
+)
+async def upload_receipt(
+    file: Annotated[UploadFile, File(description="A photo of a grocery receipt.")],
+    session: AsyncSession = Depends(get_session),
+) -> ReceiptUploadResponse:
+    """Store a receipt image and register it for processing.
+
+    Idempotent on image content: uploading the same file twice returns the
+    original receipt with `created: false` rather than creating a duplicate.
+
+    The image is stored before any processing is attempted, so a receipt is
+    never lost to an extraction failure or an API outage.
+    """
+    data = await _read_capped(file)
+
+    try:
+        result = await ingest_receipt(session, data)
+    except InvalidImageError as exc:
+        # 422 rather than 400: the request was well-formed, the content wasn't
+        # usable. The message is written to be shown to a user verbatim.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return ReceiptUploadResponse(
+        receipt=ReceiptDetail.of(result.receipt),
+        created=result.created,
+        width=result.facts.width,
+        height=result.facts.height,
+        image_format=result.facts.image_format,
+    )
+
+
+@router.get("", response_model=ReceiptListResponse, summary="List receipts")
+async def list_receipts(
+    session: AsyncSession = Depends(get_session),
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ReceiptListResponse:
+    """Most recent first by purchase date.
+
+    Ordered by `purchased_at`, not upload time: backfilled receipts belong in
+    their real chronological place (DECISIONS.md D18). Receipts not yet
+    extracted have no purchase date and sort first, which is also where they
+    want to be — they are the ones needing attention.
+    """
+    total = (await session.execute(select(func.count()).select_from(Receipt))).scalar_one()
+
+    # `desc()` is on the SQLAlchemy column, which mypy can't see through the
+    # SQLModel annotation; `col()` recovers the column expression.
+    rows = await session.execute(
+        select(Receipt)
+        .order_by(col(Receipt.purchased_at).desc().nullsfirst(), col(Receipt.id).desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return ReceiptListResponse(
+        items=[ReceiptSummary.of(r) for r in rows.scalars().all()],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{receipt_id}", response_model=ReceiptDetail, summary="Get one receipt")
+async def get_receipt(
+    receipt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> ReceiptDetail:
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No receipt with id {receipt_id}.",
+        )
+    return ReceiptDetail.of(receipt)

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ns.api.routers import health
+from ns.api.routers import health, receipts
 from ns.config import get_settings
 from ns.db import dispose_engine
 from ns.logging import configure_logging, get_logger
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(receipts.router)
 
     return app
 

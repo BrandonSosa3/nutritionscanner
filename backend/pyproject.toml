@@ -20,6 +20,7 @@ dependencies = [
     "structlog>=24.4",
     "typer>=0.15",
     "python-multipart>=0.0.17",
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +71,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# conftest sets environment defaults that must land before ns.config is
+# imported, so its imports deliberately follow module-level statements.
+"tests/conftest.py" = ["E402"]
 "src/ns/cli.py" = ["T20"]           # the CLI is allowed to print
 "alembic/versions/*" = ["E501", "I001"]
 
