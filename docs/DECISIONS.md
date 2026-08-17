@@ -221,3 +221,77 @@ is committable: `.gitignore` blocks `.env`, `data/`, `receipts/`, `uploads/`,
 `backups/`, and database dumps. Test fixture receipts are redacted and
 explicitly allowlisted. Visibility is one command to change if that calculus
 shifts.
+
+---
+
+## D16 — Design system is fixed up front · Settled
+
+[DESIGN.md](DESIGN.md) defines tokens, type scale, spacing, components, and
+copy rules before any component is written.
+
+**Why:** UI quality erodes by accumulation — a one-off hex value here, an
+inconsistent spacing value there. Fixing the system first makes "does this match
+the system?" a reviewable question instead of a matter of taste.
+
+**Core stance:** the entire interface is neutrals. Saturated color is reserved
+exclusively for resolution and reconciliation state. There is no colored primary
+button anywhere in the product. No emoji, no gradients, no decorative shadows.
+
+---
+
+## D17 — Phase 2 and 3 machinery is built early; *output* is gated on data sufficiency · Settled
+
+Supersedes the brief's "don't start a phase before its inputs exist." Phase 2
+and 3 tables land in the **first migration**. Their computation logic is built
+and unit-tested against synthetic fixtures as soon as the Phase 1 spine works —
+not months later. What waits is not the code but the **display**, behind an
+explicit sufficiency check.
+
+**Why the brief's framing was too conservative:**
+
+- Schema is nearly free to add now and expensive to migrate later. The brief
+  already conceded this for `cooked_yield_factor`; the same argument covers
+  budgets, categories, and adequacy references.
+- The Phase 2/3 computations are **pure functions** — price drift, cross-store
+  comparison, nutrient adequacy, gap-closing suggestions. Pure functions are
+  testable against fabricated inputs today. Waiting for real data to write them
+  confuses "can I test this?" with "is the answer meaningful yet?"
+- Reference data needed by Phase 3 is **static and available now**: DRI values,
+  the category taxonomy, USDA seed foods. None of it depends on receipt history.
+
+**What genuinely does require real history**, and is therefore gated:
+
+| Feature | Sufficiency gate |
+|---|---|
+| Cross-store comparison | ≥ 3 observations per item at each of ≥ 2 stores |
+| Price drift | ≥ 4 observations spanning ≥ 45 days |
+| Seasonality | ≥ 2 observations in the same month across ≥ 2 years |
+| Nutrient adequacy | ≥ 4 weeks of receipts with ≥ 80% line resolution |
+| Next-shop suggestions | adequacy gate, plus ≥ 3 candidate foods with price history |
+
+**A gated feature is visible, not hidden.** It renders its own empty state
+naming what it needs and how far along you are: *"Needs 3 more weeks of
+receipts."* This satisfies the brief's own "refuse to fire on thin data" while
+turning the wait into visible progress rather than an absent screen.
+
+**What this does not license:** building five half-finished modules at once. The
+Phase 1 spine still ships first, vertically and tested. This decision changes
+*when Phase 2/3 work starts* from "months out" to "immediately after the spine,"
+and puts their schema in migration one.
+
+---
+
+## D18 — Backfill is a first-class ingest path · Settled
+
+Old receipts can be photographed and dated retroactively. `Receipt.purchased_at`
+comes from the receipt, never from upload time, and the pipeline is indifferent
+to how old a receipt is.
+
+**Why:** it collapses the data-gathering timeline from months to an afternoon.
+A shoebox of old receipts, or a bank statement cross-check, seeds enough price
+history to clear several D17 sufficiency gates immediately. This is the single
+highest-leverage way to make Phase 2 and 3 real early.
+
+**Consequence:** the capture screen offers a date override for backfilled
+receipts where extraction can't read a faded date, and the summary views group
+by purchase date, never ingest date.
