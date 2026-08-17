@@ -12,9 +12,20 @@ Redact by painting over the region — never by cropping alone, since a crop can
 be reversed from image metadata. If an image can't be safely redacted, leave it
 out of git and reference it from a local-only path.
 
+**Strip EXIF from any camera original.** Phone photos embed GPS coordinates
+accurate to a few metres. That data is invisible in an image viewer and would
+be committed silently. `05-us-sprouts.jpg` arrived with 15 GPS fields; they
+were removed, and it was downscaled to a 2576px long edge — the maximum the
+vision model uses anyway, so extraction loses nothing.
+
+**Verify redactions by re-opening the image, not by trusting the coordinates.**
+The first redaction pass on `05` looked correct and still leaked a card
+fragment and the barcode digits. Both were caught only by looking at the
+result.
+
 ---
 
-## `01-au-produce.jpg` — metric weights, ambiguous discount lines
+## `01-au-produce.png` — metric weights, ambiguous discount lines
 
 Australian greengrocer, 06/01/2016. Produce-only basket.
 
@@ -34,7 +45,7 @@ discounts and are not. A parser that treats them as negative gets `35.28` and
 flags a clean receipt as broken. They must resolve as unresolved items with a
 known price, never guessed at.
 
-## `02-us-wholefoods.jpg` — imperial weights, PLU codes, trailing-minus
+## `02-us-wholefoods.png` — imperial weights, PLU codes, trailing-minus
 
 Whole Foods Market, Sharon Rd.
 
@@ -51,7 +62,7 @@ Whole Foods Market, Sharon Rd.
 `94135` is a live signal — the leading `9` in a 5-digit PLU means organic, which
 maps to a different USDA food than the conventional variant.
 
-## `03-za-spar.jpg` — non-USD, package sizes in the item name, bag fee
+## `03-za-spar.png` — non-USD, package sizes in the item name, bag fee
 
 SPAR Bergville, South Africa, 23.02.21. Rand.
 
@@ -72,7 +83,7 @@ this basket resolves to exact grams from text alone.
 `BANANAS LOOSE 17KG` is a trap — `17KG` is a bin or lot code, not the purchase
 weight. The real weight is `0.596kg` on the continuation line.
 
-## `04-us-costco.jpg` — SKU prefixes, quantity multipliers, dual tax rates
+## `04-us-costco.png` — SKU prefixes, quantity multipliers, dual tax rates
 
 Costco Thornton #629, 04/20/2016.
 
@@ -111,9 +122,15 @@ heavily creased** — the vision stress test.
 
 Reconciliation: `3.99 + 0.05 + 3.00 + 3.99 + 0.05 = 11.08 = BALANCE DUE`.
 
-⚠️ **This image carries PII and is not committed until redacted** — it shows a
-cardholder first name, card last-4, auth and reference numbers, and EBT
-balances.
+**Redacted.** Six full-height black bars cover the card numbers, auth and
+reference numbers, EBT balances, cardholder greeting, rewards points, and the
+barcode with its printed digits. Because the receipt is rotated, each printed
+line is a vertical strip, so bar-shaped redaction is exact rather than
+approximate.
+
+Everything the fixture exists to test survives the redaction: rotation,
+creasing, department headers, both CRV lines, the multi-buy, the store header,
+the purchase date, and the full reconciliation chain.
 
 ---
 
