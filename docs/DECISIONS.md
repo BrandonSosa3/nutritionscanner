@@ -211,10 +211,28 @@ and stops the host Python version from mattering.
 
 ---
 
-## D15 — Repository lives at `~/Projects/nutritionscanner`, public on GitHub · Settled
+## D15 — Repository lives at `~/Desktop/NutritionScanner`, public on GitHub · Settled
 
-Moved off `~/Desktop` so that an unrelated project's `CLAUDE.md` one directory
-up is no longer loaded into every session.
+**Revised 2026-08-17.** Originally moved to `~/Projects/` to escape a
+`CLAUDE.md` one directory up that was being loaded into every session. The
+actual fix was to remove that file, not to move this repo: the owner keeps all
+projects as folders on the Desktop, and moving one breaks that workflow (and
+silently empties the editor sidebar).
+
+Root cause: `~/Desktop/CLAUDE.md` was a stale March snapshot of an unrelated
+project's instructions, duplicating a newer copy that already lived inside that
+project's own repo. Because Claude Code loads `CLAUDE.md` from the working
+directory *and every parent directory*, it was being injected into every project
+kept on the Desktop — including the project it described, where it contradicted
+the current version by marking completed work as outstanding.
+
+It has been renamed to `~/Desktop/regulist-claude-STALE-2026-03-29.md.bak`.
+Nothing was deleted; only files named exactly `CLAUDE.md` are loaded, so the
+rename is sufficient.
+
+**General rule:** a project's `CLAUDE.md` belongs *inside* that project's
+directory, never in a shared parent. A `CLAUDE.md` at `~/Desktop` applies to
+every project on the Desktop.
 
 **Public** because the project is intended as portfolio work. Nothing personal
 is committable: `.gitignore` blocks `.env`, `data/`, `receipts/`, `uploads/`,
