@@ -1,0 +1,108 @@
+# Local development stack. `docker compose up` from a cold clone should give a
+# working API — no host Python, no host Postgres, no manual steps.
+#
+# Service dependencies use condition: service_healthy so the API never starts
+# against a Postgres that is still initialising. That race is the single most
+# common "works on my machine" failure in a compose stack.
+
+name: nutritionscanner
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ns
+      POSTGRES_PASSWORD: ns_local_dev
+      POSTGRES_DB: nutritionscanner
+      # Deterministic collation so ORDER BY behaves identically everywhere.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5433:5432" # 5433 on the host to avoid colliding with a local Postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ns -d nutritionscanner"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      ENVIRONMENT: local
+      DATABASE_URL: postgresql+asyncpg://ns:ns_local_dev@postgres:5432/nutritionscanner
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      USDA_API_KEY: ${USDA_API_KEY:-}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live reload against the host source in development. The image still
+      # contains the code, so production runs without any bind mount.
+      - ./backend/src:/app/src:ro
+      - receipt_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      [
+        "uvicorn",
+        "ns.api.app:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "/app/src",
+      ]
+
+  worker:
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      ENVIRONMENT: local
+      DATABASE_URL: postgresql+asyncpg://ns:ns_local_dev@postgres:5432/nutritionscanner
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      USDA_API_KEY: ${USDA_API_KEY:-}
+      LOG_LEVEL: INFO
+    volumes:
+      - ./backend/src:/app/src:ro
+      - receipt_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # The image healthcheck curls the HTTP port, which the worker doesn't
+    # serve. Left enabled it would report unhealthy forever.
+    healthcheck:
+      disable: true
+    command: ["arq", "ns.jobs.worker.WorkerSettings"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  receipt_data:

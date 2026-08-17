@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.env
+.env.*
+data/
+tests/fixtures/receipts/*.jpg
+tests/fixtures/receipts/*.jpeg
+tests/fixtures/receipts/*.png

@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  backend:
+    name: Backend — lint, types, tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # Real Postgres and Redis, not mocks. Integration tests and migrations run
+    # against the same engines used in development and production.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ns
+          POSTGRES_PASSWORD: ns_local_dev
+          POSTGRES_DB: nutritionscanner
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ns -d nutritionscanner"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      ENVIRONMENT: ci
+      DATABASE_URL: postgresql+asyncpg://ns:ns_local_dev@localhost:5433/nutritionscanner
+      REDIS_URL: redis://localhost:6380/0
+      LOG_LEVEL: WARNING
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/pyproject.toml
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv venv --python ${{ env.PYTHON_VERSION }}
+          VIRTUAL_ENV=.venv uv pip install -r pyproject.toml --extra dev
+          VIRTUAL_ENV=.venv uv pip install --no-deps -e .
+          # Put the venv on PATH: Alembic's post-write hook shells out to
+          # `ruff` by name, so it must resolve without an explicit path.
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Format check (ruff)
+        run: ruff format --check src/ tests/
+
+      - name: Type check (mypy strict)
+        run: mypy src/
+
+      - name: Migrations apply to an empty database
+        run: alembic upgrade head
+
+      - name: Migrations have no un-generated model changes
+        # Guards the most common Alembic failure: a model edited without a
+        # matching migration. Autogenerate against the freshly migrated schema
+        # must produce an empty diff.
+        run: |
+          alembic revision --autogenerate -m "ci_drift_check" --rev-id ci_drift
+          if grep -qE "op\.(create_table|drop_table|add_column|drop_column|alter_column|create_index|drop_index)" alembic/versions/*ci_drift*.py; then
+            echo "::error::Model changes are not captured in a migration. Run: make migration m=\"...\""
+            cat alembic/versions/*ci_drift*.py
+            rm -f alembic/versions/*ci_drift*.py
+            exit 1
+          fi
+          rm -f alembic/versions/*ci_drift*.py
+
+      - name: Tests (including integration)
+        run: pytest --cov --cov-report=term-missing
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: runtime
+          push: false
+          load: true
+          tags: nutritionscanner-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Container starts and serves liveness
+        run: |
+          docker run -d --name api-smoke -p 8000:8000 \
+            -e ENVIRONMENT=ci \
+            -e DATABASE_URL=postgresql+asyncpg://u:p@localhost:5432/db \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            nutritionscanner-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then
+              echo "container healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::container never became healthy"
+          docker logs api-smoke
+          exit 1
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f api-smoke || true
