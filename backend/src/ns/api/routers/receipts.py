@@ -9,10 +9,12 @@ from sqlmodel import col
 
 from ns.api.schemas import (
     ExtractionResponse,
+    NormalizationResponse,
     ReceiptDetail,
     ReceiptListResponse,
     ReceiptSummary,
     ReceiptUploadResponse,
+    ReconciliationResponse,
 )
 from ns.db import get_session
 from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
@@ -20,6 +22,8 @@ from ns.logging import get_logger
 from ns.models import Receipt
 from ns.pipeline.extract import extract_receipt
 from ns.pipeline.ingest import ingest_receipt
+from ns.pipeline.normalize import normalize_receipt
+from ns.pipeline.reconcile import reconcile_receipt
 from ns.providers.anthropic.budget import BudgetExceededError
 from ns.providers.anthropic.client import MissingApiKeyError
 
@@ -181,4 +185,70 @@ async def extract(
         notes=extraction.notes,
         cost_usd=str(outcome.call.cost_usd),
         latency_ms=outcome.call.latency_ms,
+    )
+
+
+@router.post(
+    "/{receipt_id}/normalize",
+    response_model=NormalizationResponse,
+    summary="Rebuild line items from the stored extraction",
+)
+async def normalize(
+    receipt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> NormalizationResponse:
+    """Turn the stored transcription into structured line items.
+
+    Free and repeatable: it replays from `raw_extraction` and never touches
+    the image or the API. Re-running replaces this receipt's line items, so
+    it is also how a normaliser change gets applied to receipts already on
+    file.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    try:
+        result = await normalize_receipt(session, receipt)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return NormalizationResponse(
+        receipt_id=receipt_id,
+        status=result.receipt.status,
+        line_item_count=len(result.line_items),
+        dropped=result.dropped,
+        with_grams=sum(1 for i in result.line_items if i.grams_as_purchased is not None),
+        unparseable_amounts=result.unparseable_amounts,
+    )
+
+
+@router.post(
+    "/{receipt_id}/reconcile",
+    response_model=ReconciliationResponse,
+    summary="Check that the receipt's arithmetic closes",
+)
+async def reconcile(
+    receipt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> ReconciliationResponse:
+    """Add the basket up and compare it against the printed total.
+
+    Also free to re-run. A receipt that does not balance comes back as
+    `suspect` with a report explaining what was summed and what would have
+    made it close — never as clean.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    result = await reconcile_receipt(session, receipt)
+
+    return ReconciliationResponse(
+        receipt_id=receipt_id,
+        status=receipt.status,
+        reconciliation_status=result.status,
+        delta_cents=result.delta_cents,
+        tax_model=result.tax_model,
+        report=result.report,
     )

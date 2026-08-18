@@ -95,9 +95,17 @@ jobs:
         # Guards the most common Alembic failure: a model edited without a
         # matching migration. Autogenerate against the freshly migrated schema
         # must produce an empty diff.
+        #
+        # This greps for *any* operation rather than a list of interesting
+        # ones. An allowlist is only as good as its authors' imagination, and
+        # this one already missed `drop_constraint` — which is how a diff
+        # proposing to strip every enum CHECK constraint could have landed
+        # looking like housekeeping. Constraints autogenerate cannot see are
+        # excluded at the source, in alembic/env.py, where the reason is
+        # written down.
         run: |
           alembic revision --autogenerate -m "ci_drift_check" --rev-id ci_drift
-          if grep -qE "op\.(create_table|drop_table|add_column|drop_column|alter_column|create_index|drop_index)" alembic/versions/*ci_drift*.py; then
+          if grep -qE "^\s+op\." alembic/versions/*ci_drift*.py; then
             echo "::error::Model changes are not captured in a migration. Run: make migration m=\"...\""
             cat alembic/versions/*ci_drift*.py
             rm -f alembic/versions/*ci_drift*.py

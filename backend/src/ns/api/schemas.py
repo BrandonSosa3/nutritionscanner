@@ -112,3 +112,37 @@ class BudgetStatusResponse(BaseModel):
     remaining_usd: str | None
     is_exhausted: bool
     call_count: int
+
+
+class NormalizationResponse(BaseModel):
+    """What normalisation made of a stored extraction.
+
+    `dropped` counts lines that carry no basket value — section headers,
+    payment lines, and anything with no readable amount. `unparseable_amounts`
+    lists the printed text of amounts that could not be read, so a
+    transcription problem is visible rather than silently absorbed.
+    """
+
+    receipt_id: int
+    status: PipelineStatus
+    line_item_count: int
+    dropped: int
+    with_grams: int
+    unparseable_amounts: list[str]
+
+
+class ReconciliationResponse(BaseModel):
+    """Whether a receipt's arithmetic closes, and the evidence either way.
+
+    `report` is the full working: what was summed, what the receipt stated,
+    every check that ran, and — when the total does not close — the specific
+    misreadings that would have made it close. It is meant to be rendered,
+    not just logged.
+    """
+
+    receipt_id: int
+    status: PipelineStatus
+    reconciliation_status: ReconciliationStatus
+    delta_cents: int | None
+    tax_model: str
+    report: dict[str, object]

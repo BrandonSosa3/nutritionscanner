@@ -78,6 +78,23 @@ def _money_or_none(value: str | None) -> int | None:
         return None
 
 
+def _parse_count(text: str | None) -> Decimal | None:
+    """A bare multiplier like `3` from Costco's `3 @ 4.29`.
+
+    `parse_quantity` deliberately refuses text with no unit, because a bare
+    number is not a measurement. It is still a count, and dropping it loses
+    the only evidence that one printed line covers three cartons of eggs —
+    which is exactly what the item-count cross-check reads.
+    """
+    if not text:
+        return None
+    try:
+        value = Decimal(str(text).strip())
+    except (ArithmeticError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _derive_grams(item: ExtractedLineItem) -> tuple[Decimal | None, GramsBasis]:
     """Grams from what the receipt states, or nothing.
 
@@ -143,6 +160,8 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
 
         grams, basis = _derive_grams(item)
         quantity = parse_quantity(item.quantity)
+        # A measured quantity carries its unit; a bare count carries none.
+        count = _parse_count(item.quantity) if quantity is None else None
 
         line_items.append(
             LineItem(
@@ -153,7 +172,7 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
                 normalizer_version=NORMALIZER_VERSION,
                 kind=_KIND_MAP.get(item.kind, LineItemKind.UNKNOWN),
                 price_cents=price_cents,
-                quantity=quantity.value if quantity else None,
+                quantity=quantity.value if quantity else count,
                 unit=quantity.unit if quantity else None,
                 grams_as_purchased=grams,
                 grams_basis=basis,

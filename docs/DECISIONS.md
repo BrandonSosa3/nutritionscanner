@@ -313,3 +313,71 @@ highest-leverage way to make Phase 2 and 3 real early.
 **Consequence:** the capture screen offers a date override for backfilled
 receipts where extraction can't read a faded date, and the summary views group
 by purchase date, never ingest date.
+
+---
+
+## D19 — The tax model is read off the receipt, not looked up by country · Settled
+
+US receipts print prices excluding sales tax and add it at the end. South
+African, Australian, and European receipts print VAT-inclusive prices and then
+restate the VAT as information — adding it again double-counts. Reconciliation
+evaluates both readings and uses whichever closes, recording the choice and the
+delta the rejected reading would have produced.
+
+**Why:** a country lookup table is wrong at the edges — US receipts with
+inclusive deposits, tourist-VAT receipts, and any store that changes its print
+format — and it is a fact about the world that has to be maintained. Whether
+the total equals the items plus tax is a fact about *this receipt*, printed on
+it, and it is free to check.
+
+**Rules out:** a `Store.tax_inclusive` flag as the primary mechanism, and any
+hardcoded currency-to-tax-model mapping.
+
+**Consequence:** when tax is zero or absent the two readings coincide and no
+claim is made (`tax_model: not_applicable`). When neither closes, the delta is
+reported under the exclusive reading — not under whichever happens to be less
+wrong, which would dress an arbitrary pick up as a finding.
+
+---
+
+## D20 — Unclassified lines count at face value; failures are explained, never repaired · Settled
+
+A line the extractor could not classify, but which carries a printed amount, is
+summed with its printed sign. When a receipt does not balance, reconciliation
+computes which specific misreading would have made it close and states that as
+a hypothesis — it never applies the fix.
+
+**Why:** fixture 01 prints bare `SPECIAL` lines with positive amounts and no
+item name, and they are genuinely part of that basket; excluding them puts a
+clean receipt 3.92 short, and negating them yields the documented 35.28. There
+is no blanket rule for unclassified lines that is right for both that receipt
+and a misclassified `TOTAL NUMBER OF ITEMS SOLD = 11`. Face value plus an
+explanation is right for both, and keeps the decision with the user.
+
+**Rules out:** silently dropping unclassified lines, sign-guessing discounts,
+and any auto-correction that changes a stored amount to make a total close.
+
+**Consequence:** `reconciliation_report.hypotheses` is a first-class output the
+correction UI reads. This is what caught the extraction defect that turned an
+item count into an $11.00 line.
+
+---
+
+## D21 — An unreadable total falls back to the printed subtotal · Settled
+
+When extraction cannot read the total but the subtotal is legible, the line
+items are checked against the subtotal, and `checked_against` records which
+anchor was used. Only a receipt with neither is `unreconcilable`.
+
+**Why:** the Costco fixture's total is covered by our own redaction bar, and
+creases and torn corners do the same to real receipts. Items summing exactly to
+the printed subtotal verifies the item prices — which is what cost-per-nutrient
+is actually built from — and writing the whole receipt off as unreconcilable
+discards a real result.
+
+**Rules out:** inferring a total from a payment line, which is an
+interpretation rather than a reading.
+
+**Consequence:** a subtotal-anchored pass makes a narrower claim and says so in
+its own detail text: it confirms the item prices but not the tax or the amount
+paid. The UI must not render it as a full reconciliation.

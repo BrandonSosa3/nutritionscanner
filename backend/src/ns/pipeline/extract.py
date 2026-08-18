@@ -131,7 +131,7 @@ async def extract_receipt(
     receipt.extraction_prompt_version = call.prompt_version
     receipt.extracted_at = utcnow()
     receipt.currency = extraction.currency or receipt.currency
-    receipt.status = PipelineStatus.NORMALIZED  # ready for the next stage
+    receipt.status = PipelineStatus.EXTRACTED  # transcribed; normalisation is next
     receipt.updated_at = utcnow()
     await session.flush()
 

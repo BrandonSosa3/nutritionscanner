@@ -82,4 +82,12 @@ COPY --from=dev-builder --chown=app:app /app/.venv /app/.venv
 COPY --from=dev-builder --chown=app:app /app/src /app/src
 COPY --from=dev-builder --chown=app:app /app/alembic /app/alembic
 COPY --from=dev-builder --chown=app:app /app/alembic.ini /app/alembic.ini
+
+# The package is installed into the venv as a copy, so without this the
+# bind-mounted /app/src is watched by --reload but never imported: the
+# container silently keeps serving whatever was baked into the image. Putting
+# the source first on the path makes the mount authoritative. Development
+# only — `runtime` imports the installed copy, with no mount involved.
+ENV PYTHONPATH=/app/src
+
 USER app

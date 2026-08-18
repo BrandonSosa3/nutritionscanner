@@ -5,8 +5,8 @@ Two decisions are load-bearing here:
 D2: keyed on `(normalized_text, store_id)`, not on text alone. Receipt
 abbreviations collide across chains, and a nullable store column is dead
 weight if the text is globally unique. The global fallback row
-(`store_id IS NULL`) needs a partial unique index, added by hand in the
-migration because Postgres treats NULLs as distinct.
+(`store_id IS NULL`) needs a partial unique index, because Postgres treats
+NULLs as distinct.
 
 D3: stores a gram *rule*, never a bare gram figure. Food identity is stable
 across purchases; weight usually is not. Replaying "1.2 lb of broccoli =
@@ -16,6 +16,7 @@ across purchases; weight usually is not. Replaying "1.2 lb of broccoli =
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import text
 from sqlmodel import Field, Index, SQLModel
 
 from ns.models.base import enum_column, grams_column, timestamp_column, utcnow
@@ -49,7 +50,20 @@ class Correction(SQLModel, table=True):
     last_applied_at: datetime | None = Field(default=None, sa_column=timestamp_column())
 
     __table_args__ = (
-        # Store-specific uniqueness. The global row is covered by a partial
-        # unique index created in the migration.
+        # Store-specific uniqueness.
         Index("uq_correction_text_store", "normalized_text", "store_id", unique=True),
+        # Postgres treats NULLs as distinct in a unique index, so the index
+        # above does NOT stop two global corrections for the same text, and
+        # tier-1b resolution could then match either of two conflicting rows.
+        # A partial index over the global rows closes that.
+        #
+        # Declared here and not only in the migration: an index the database
+        # has and the models do not is drift, and it makes every subsequent
+        # autogenerate propose dropping it.
+        Index(
+            "uq_correction_text_global",
+            "normalized_text",
+            unique=True,
+            postgresql_where=text("store_id IS NULL"),
+        ),
     )

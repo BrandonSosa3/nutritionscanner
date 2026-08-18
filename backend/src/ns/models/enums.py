@@ -19,6 +19,7 @@ class PipelineStatus(StrEnum):
     UPLOADED = "uploaded"  # image stored and hashed — a receipt is never lost
     EXTRACTING = "extracting"
     EXTRACT_FAILED = "extract_failed"  # API down or unreadable; retryable
+    EXTRACTED = "extracted"  # transcribed; no line items built from it yet
     NORMALIZED = "normalized"
     RECONCILED = "reconciled"
     RESOLVING = "resolving"

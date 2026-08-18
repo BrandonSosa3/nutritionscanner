@@ -53,7 +53,7 @@ async def test_normalisation_creates_line_items(
 
     result = await normalize_receipt(session, receipt)
 
-    assert len(result.line_items) == 2
+    assert len(result.line_items) == 15
     assert receipt.status is PipelineStatus.NORMALIZED
 
 
@@ -98,7 +98,7 @@ async def test_rerunning_replaces_rather_than_appends(
     await normalize_receipt(session, receipt)
     await normalize_receipt(session, receipt)
 
-    assert len(await _items(session, receipt)) == 2
+    assert len(await _items(session, receipt)) == 15
 
 
 async def test_normalising_without_an_extraction_is_refused(
@@ -231,8 +231,13 @@ async def test_section_headers_and_payment_lines_are_dropped(
         await extract_receipt(session, receipt, storage=storage)
     result = await normalize_receipt(session, receipt)
 
-    assert result.dropped == 2
-    assert all(i.kind is LineItemKind.PRODUCT for i in result.line_items)
+    # Three are dropped from the receipt itself — the `3 @ 4.29` multiplier
+    # line, which carries no amount, and Costco's two payment lines — plus the
+    # two added here.
+    assert result.dropped == 5
+    kept = {i.raw_text for i in result.line_items}
+    assert "GROCERY" not in kept
+    assert "CHANGE" not in kept
 
 
 async def test_ambiguous_lines_are_preserved_as_unknown(
@@ -272,6 +277,9 @@ async def test_the_costco_basket_reconciles_after_normalisation(
     items = await _items(session, receipt)
     products = [i for i in items if i.kind is LineItemKind.PRODUCT]
 
-    assert sum(i.price_cents for i in products) == 2399 + 1287
+    # Nine printed product lines summing to exactly the printed subtotal.
+    assert len(products) == 9
+    assert sum(i.price_cents for i in products) == 8561 == receipt.subtotal_cents
+    assert receipt.subtotal_cents + receipt.tax_cents == receipt.total_cents == 8913
     assert receipt.subtotal_cents == parse_money_to_cents("85.61")
     assert receipt.total_cents == receipt.subtotal_cents + receipt.tax_cents

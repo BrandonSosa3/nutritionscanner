@@ -34,7 +34,18 @@ def storage(tmp_path: Path) -> LocalReceiptStorage:
 
 
 def fake_extraction() -> ExtractedReceipt:
-    """Shaped like the Costco fixture, whose arithmetic we know exactly."""
+    """The Costco fixture, transcribed as the model actually transcribed it.
+
+    This is the real receipt 04-us-costco.png, copied from a live extraction
+    rather than invented, so its arithmetic is genuinely the paper's: the nine
+    products sum to exactly 85.61, tax is 3.52, and the total is 89.13. Two
+    tax rate lines are printed alongside a summary tax line, the `3 @ 4.29`
+    multiplier sits on its own line above the eggs, and the item count of 11
+    is 9 printed lines with the eggs counted three times.
+
+    Every downstream stage reads this, so keeping it faithful means the tests
+    exercise real messiness rather than a shape that was convenient to write.
+    """
     return ExtractedReceipt(
         store_name="COSTCO WHOLESALE",
         store_location="Thornton #629",
@@ -43,19 +54,124 @@ def fake_extraction() -> ExtractedReceipt:
         line_items=[
             ExtractedLineItem(
                 line_index=0,
-                raw_text="FF BS BREAST",
+                raw_text="E FF BS BREAST",
                 amount="23.99",
                 kind="product",
                 item_code="673919",
             ),
             ExtractedLineItem(
                 line_index=1,
+                raw_text="E KS DICED TOM",
+                amount="6.49",
+                kind="product",
+                item_code="633561",
+            ),
+            ExtractedLineItem(
+                line_index=2,
+                raw_text="E JACKORGSALSA",
+                amount="2.97",
+                kind="product",
+                item_code="967596",
+            ),
+            ExtractedLineItem(
+                line_index=3,
+                raw_text="3 @ 4.29",
+                amount=None,
+                kind="unknown",
+                quantity="3",
+                unit_price="4.29",
+            ),
+            ExtractedLineItem(
+                line_index=4,
                 raw_text="18CT EGGS",
                 amount="12.87",
                 kind="product",
                 quantity="3",
                 unit_price="4.29",
                 item_code="878137",
+            ),
+            ExtractedLineItem(
+                line_index=5,
+                raw_text="E GRAPE TOMATO",
+                amount="6.29",
+                kind="product",
+                item_code="77053",
+            ),
+            ExtractedLineItem(
+                line_index=6,
+                raw_text="ECO HALF PAN",
+                amount="6.49",
+                kind="product",
+                item_code="404609",
+            ),
+            ExtractedLineItem(
+                line_index=7,
+                raw_text="E GRND TURKEY",
+                amount="18.47",
+                kind="product",
+                item_code="55992",
+            ),
+            ExtractedLineItem(
+                line_index=8,
+                raw_text="E CHPD ONION",
+                amount="3.59",
+                kind="product",
+                item_code="263423",
+            ),
+            ExtractedLineItem(
+                line_index=9,
+                raw_text="E MONT JACK 2#",
+                amount="4.45",
+                kind="product",
+                item_code="22101",
+            ),
+            ExtractedLineItem(
+                line_index=10,
+                raw_text="SUBTOTAL",
+                amount="85.61",
+                kind="subtotal",
+            ),
+            ExtractedLineItem(
+                line_index=11,
+                raw_text="TAX",
+                amount="3.52",
+                kind="tax",
+            ),
+            ExtractedLineItem(
+                line_index=12,
+                raw_text="**** TOTAL",
+                amount="89.13",
+                kind="total",
+            ),
+            ExtractedLineItem(
+                line_index=13,
+                raw_text="Check/Member Prntd",
+                amount="89.13",
+                kind="payment",
+            ),
+            ExtractedLineItem(
+                line_index=14,
+                raw_text="CHANGE",
+                amount="0.00",
+                kind="payment",
+            ),
+            ExtractedLineItem(
+                line_index=15,
+                raw_text="A 8.50% TAX",
+                amount="0.55",
+                kind="tax",
+            ),
+            ExtractedLineItem(
+                line_index=16,
+                raw_text="E 3.75% TAX",
+                amount="2.97",
+                kind="tax",
+            ),
+            ExtractedLineItem(
+                line_index=17,
+                raw_text="TOTAL TAX",
+                amount="3.52",
+                kind="tax",
             ),
         ],
         subtotal="85.61",
@@ -145,7 +261,7 @@ async def test_extraction_stores_the_transcription_verbatim(
 
     assert receipt.raw_extraction is not None
     assert receipt.raw_extraction["store_name"] == "COSTCO WHOLESALE"
-    assert len(receipt.raw_extraction["line_items"]) == 2
+    assert len(receipt.raw_extraction["line_items"]) == 18
     # Amounts stay as printed strings — parsing to cents is normalisation's job.
     assert receipt.raw_extraction["total"] == "89.13"
     assert outcome.extraction.total == "89.13"
@@ -163,7 +279,9 @@ async def test_extraction_records_provenance(
     assert receipt.extraction_model == "claude-opus-5"
     assert receipt.extraction_prompt_version == "abc123def456"
     assert receipt.extracted_at is not None
-    assert receipt.status is PipelineStatus.NORMALIZED
+    # Transcribed, not yet normalised — there are no line items until
+    # normalisation runs, and the status must not claim otherwise.
+    assert receipt.status is PipelineStatus.EXTRACTED
 
 
 async def test_extraction_adopts_the_receipt_currency(
