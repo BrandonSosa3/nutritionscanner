@@ -81,3 +81,34 @@ class ErrorResponse(BaseModel):
     """Errors state what happened and what to do about it (see DESIGN.md)."""
 
     detail: str = Field(description="Human-readable, safe to show a user verbatim.")
+
+
+class ExtractionResponse(BaseModel):
+    """What extraction produced, summarised for the client.
+
+    The full transcription is available on the receipt detail endpoint as
+    `raw_extraction`; this is the at-a-glance version.
+    """
+
+    receipt_id: int
+    status: PipelineStatus
+    store_name: str | None
+    purchased_at: str | None
+    currency: str
+    line_item_count: int
+    total: str | None
+    legibility: str
+    notes: str | None
+    cost_usd: str
+    latency_ms: int
+
+
+class BudgetStatusResponse(BaseModel):
+    """Current month's LLM spend against the configured ceiling."""
+
+    month: date
+    limit_usd: str | None
+    spent_usd: str
+    remaining_usd: str | None
+    is_exhausted: bool
+    call_count: int

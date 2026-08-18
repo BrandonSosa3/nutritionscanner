@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from ns.api.schemas import (
+    ExtractionResponse,
     ReceiptDetail,
     ReceiptListResponse,
     ReceiptSummary,
@@ -17,7 +18,10 @@ from ns.db import get_session
 from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
 from ns.logging import get_logger
 from ns.models import Receipt
+from ns.pipeline.extract import extract_receipt
 from ns.pipeline.ingest import ingest_receipt
+from ns.providers.anthropic.budget import BudgetExceededError
+from ns.providers.anthropic.client import MissingApiKeyError
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 log = get_logger(__name__)
@@ -126,3 +130,55 @@ async def get_receipt(
             detail=f"No receipt with id {receipt_id}.",
         )
     return ReceiptDetail.of(receipt)
+
+
+@router.post(
+    "/{receipt_id}/extract",
+    response_model=ExtractionResponse,
+    summary="Run extraction on a stored receipt",
+)
+async def extract(
+    receipt_id: int,
+    force: Annotated[
+        bool, Query(description="Re-extract a receipt that already has a transcription.")
+    ] = False,
+    session: AsyncSession = Depends(get_session),
+) -> ExtractionResponse:
+    """Transcribe the receipt image into structured data.
+
+    Runs synchronously so the result is visible immediately; the same work is
+    available as a background job for bulk processing.
+
+    Extraction is idempotent unless `force` is set — a receipt that already has
+    a transcription is not re-sent, because that costs money and yields nothing
+    new. Re-running with `force` is how a prompt revision gets evaluated
+    against a receipt already on file.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    try:
+        outcome = await extract_receipt(session, receipt, force=force)
+    except MissingApiKeyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BudgetExceededError as exc:
+        # 402: the request is valid, but spending it would breach the ceiling.
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    extraction = outcome.extraction
+    return ExtractionResponse(
+        receipt_id=receipt_id,
+        status=outcome.receipt.status,
+        store_name=extraction.store_name,
+        purchased_at=extraction.purchased_at,
+        currency=extraction.currency,
+        line_item_count=len(extraction.line_items),
+        total=extraction.total,
+        legibility=extraction.legibility,
+        notes=extraction.notes,
+        cost_usd=str(outcome.call.cost_usd),
+        latency_ms=outcome.call.latency_ms,
+    )

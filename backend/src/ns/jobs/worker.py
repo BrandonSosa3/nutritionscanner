@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 from arq.connections import RedisSettings
 
 from ns.config import get_settings
-from ns.jobs.tasks import ping
+from ns.jobs.tasks import extract_receipt_task, ping
 from ns.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -35,7 +35,7 @@ def _redis_settings() -> RedisSettings:
 class WorkerSettings:
     """arq entry point: `arq ns.jobs.worker.WorkerSettings`."""
 
-    functions: ClassVar[list[Any]] = [ping]
+    functions: ClassVar[list[Any]] = [ping, extract_receipt_task]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = _redis_settings()
