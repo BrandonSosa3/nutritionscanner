@@ -8,6 +8,7 @@ tracked number there is no way to tell whether a prompt change helped.
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Index, SQLModel
 
 from ns.models.base import enum_column, grams_column, jsonb_column, timestamp_column, utcnow
@@ -50,7 +51,24 @@ class EvalExample(SQLModel, table=True):
         sa_column=enum_column(EvalSplit, nullable=False, index=True),
     )
 
-    source_line_item_id: int | None = Field(default=None, foreign_key="line_item.id", index=True)
+    # Provenance only, and cleared rather than blocking (`SET NULL`).
+    # Normalisation replaces a receipt's line items wholesale, which a plain
+    # foreign key turned into a hard failure: once a line had been labelled,
+    # its receipt could never be re-normalised, and "every stage after extract
+    # is replayable from the stored extraction" stopped being true.
+    #
+    # The label survives losing this pointer. `raw_text`, `normalized_text`,
+    # and the expected answer are all stored on the row itself, deliberately,
+    # so an example is self-contained.
+    source_line_item_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("line_item.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     added_at: datetime = Field(default_factory=utcnow, sa_column=timestamp_column(nullable=False))
 
 

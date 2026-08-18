@@ -30,6 +30,7 @@ from ns.logging import get_logger
 from ns.models import LineItem, Receipt
 from ns.models.base import utcnow
 from ns.models.enums import GramsBasis, LineItemKind, PipelineStatus
+from ns.pipeline.stores import resolve_store
 from ns.providers.anthropic.schemas import ExtractedLineItem, ExtractedReceipt
 
 log = get_logger(__name__)
@@ -184,6 +185,15 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
         )
 
     session.add_all(line_items)
+
+    receipt.currency = extraction.currency or receipt.currency
+    # Store identity is the same job as the rest of this stage: read the
+    # stored extraction and populate a structured field from it. It is text
+    # matching against rows we already have, so it costs nothing and is
+    # deterministic, and doing it here means a re-run picks up aliases learned
+    # since. Tier 1a of resolution — store-specific corrections — has nothing
+    # to key on until this has run.
+    await resolve_store(session, receipt, extraction.store_name, extraction.store_location)
 
     receipt.purchased_at = _parse_date(extraction.purchased_at)
     receipt.subtotal_cents = _money_or_none(extraction.subtotal)

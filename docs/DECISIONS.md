@@ -456,3 +456,30 @@ that have nothing to do with the resolver — which defeats the purpose of
 tracking a number over time. Holdout labels never feed the corrections table
 used at inference, so scoring against them is not scoring the resolver on
 answers it was handed.
+
+---
+
+## D26 — A store is a branch, matched by exact text, and identified during normalisation · Settled
+
+`Store` rows are branches, not chains. Identification runs inside normalisation
+— it reads the stored extraction and fills in a structured field, which is
+exactly what that stage does — and matches in three passes: the full header as
+an alias, then chain name plus branch number, then chain name plus location.
+No model call.
+
+**Why:** nothing created `Store` rows before this, so `Receipt.store_id` was
+always null and tier 1a of resolution could never fire — every correction was
+silently global (BRIEF amendment A6). Branch granularity is required because
+prices differ between branches, and the Phase 2 cross-store comparison compares
+a store against itself if two branches collapse into one row.
+
+**Rules out:** fuzzy string matching and an LLM call for store identity. Both
+add non-determinism to something that is a lookup against rows we already
+have. Unmatched headers become a new store — an honest record of what was
+printed — and every header that resolved is kept as an alias, so the same
+variant hits the fast path next time.
+
+**Consequence:** a store number outranks location text, because `#629` is the
+strongest identifier a receipt carries and survives the header being laid out
+differently. `3150 Sharon Rd` must not read as branch 3150, so a bare number is
+never enough.

@@ -109,13 +109,13 @@ def patch_resolve(*answers: ResolvedLine, echo: bool = False) -> Any:
 
 
 async def normalized_receipt(
-    session: AsyncSession,
-    storage: LocalReceiptStorage,
-    *,
-    store: Store | None = None,
-    color: str = "white",
+    session: AsyncSession, storage: LocalReceiptStorage, *, color: str = "white"
 ) -> Receipt:
     """A receipt through extract and normalize, ready to resolve.
+
+    The store comes from normalisation, which reads it off the extraction — so
+    a test using `store_of` is exercising the real chain rather than a store
+    it attached by hand.
 
     `color` varies the image so a test needing two distinct receipts gets two.
     Ingestion is idempotent on content hash, so the same bytes are one receipt
@@ -127,10 +127,15 @@ async def normalized_receipt(
     with patch_call():
         await extract_receipt(session, receipt, storage=storage)
     await normalize_receipt(session, receipt)
-    if store is not None:
-        receipt.store_id = store.id
-        await session.flush()
     return receipt
+
+
+async def store_of(session: AsyncSession, receipt: Receipt) -> Store:
+    """The store normalisation resolved for this receipt."""
+    store = await session.get(Store, receipt.store_id)
+    if store is None:  # pragma: no cover - a normalised fixture always has one
+        raise AssertionError("normalisation did not attach a store")
+    return store
 
 
 async def lines_of(session: AsyncSession, receipt: Receipt) -> list[LineItem]:
@@ -343,8 +348,8 @@ async def test_tax_and_total_lines_are_left_alone(
 async def test_a_correction_resolves_without_a_model_call(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     food = await make_food(session, "chicken breast, boneless skinless, raw")
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
@@ -375,8 +380,8 @@ async def test_a_store_correction_beats_a_global_one(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """`KS DICED TOM` means something at Costco it does not mean elsewhere."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     specific = await make_food(session, "the store specific food")
     fallback = await make_food(session, "the global fallback food")
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
@@ -404,8 +409,7 @@ async def test_a_store_correction_beats_a_global_one(
 async def test_a_global_correction_applies_when_no_store_one_matches(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
     fallback = await make_food(session, "the global fallback food")
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
@@ -424,9 +428,8 @@ async def test_a_global_correction_applies_when_no_store_one_matches(
 async def test_a_correction_at_another_store_does_not_apply(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    here = await make_store(session, "Costco")
+    receipt = await normalized_receipt(session, storage)
     elsewhere = await make_store(session, "Sprouts")
-    receipt = await normalized_receipt(session, storage, store=here)
     food = await make_food(session, "the other store's food")
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
@@ -446,8 +449,8 @@ async def test_a_correction_at_another_store_does_not_apply(
 async def test_a_nonfood_correction_marks_the_line_nonfood(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
     session.add(
@@ -498,8 +501,8 @@ async def test_re_running_picks_up_a_correction_added_since(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """The loop: an unresolved line, a fix, and a free re-run that uses it."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     items = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
     with patch_resolve():  # everything comes back unresolved

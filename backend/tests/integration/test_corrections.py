@@ -29,10 +29,10 @@ from tests.integration.test_extract import patch_call
 from tests.integration.test_resolve import (
     lines_of,
     make_food,
-    make_store,
     normalized_receipt,
     patch_resolve,
     resolved,
+    store_of,
 )
 from tests.unit.test_images import make_image
 
@@ -59,10 +59,12 @@ async def test_a_correction_reaches_receipts_already_processed(
 ) -> None:
     """A fix that only helped future receipts would leave the user's own
     history disagreeing with their own correction."""
-    store = await make_store(session)
-    first = await normalized_receipt(session, storage, store=store, color="white")
-    second = await normalized_receipt(session, storage, store=store, color="black")
+    first = await normalized_receipt(session, storage, color="white")
+    second = await normalized_receipt(session, storage, color="black")
     assert first.id != second.id
+    # Both headers are the same Costco, so store resolution gives them one store.
+    store = await store_of(session, first)
+    assert second.store_id == store.id
 
     with patch_resolve():  # both left unresolved
         await resolve_receipt(session, first)
@@ -89,8 +91,8 @@ async def test_a_correction_reaches_receipts_already_processed(
 async def test_a_correction_is_stored_for_next_time(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
     food = await make_food(session, "a corrected food")
 
@@ -110,8 +112,8 @@ async def test_a_correction_is_stored_for_next_time(
 async def test_correcting_the_same_line_twice_revises_one_correction(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
     wrong = await make_food(session, "the wrong food")
     right = await make_food(session, "the right food")
@@ -138,8 +140,8 @@ async def test_correcting_the_same_line_twice_revises_one_correction(
 async def test_a_global_correction_is_scoped_to_no_store(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
     food = await make_food(session, "a globally corrected food")
 
@@ -154,8 +156,8 @@ async def test_a_correction_stores_a_rule_not_a_weight(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """D3. "Eggs come in 900 g boxes", never "that box weighed 900 g"."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(
         i
         for i in await lines_of(session, receipt)
@@ -182,8 +184,8 @@ async def test_a_nonfood_correction_needs_no_food(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """ "This is paper towels" is a valid, useful correction."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
 
     await record_correction(session, line, is_nonfood=True, store_id=store.id)
@@ -200,8 +202,8 @@ async def test_a_nonfood_correction_needs_no_food(
 async def test_a_correction_creates_an_eval_example(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
     food = await make_food(session, "a labelled food")
 
@@ -219,8 +221,8 @@ async def test_a_confirmation_is_a_label_too(
 ) -> None:
     """Without these the eval set is entirely the resolver's failures — a
     biased sample that can never show an improvement."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     lines = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
 
     with patch_resolve(resolved(lines[0].line_index, "chicken breast, raw")):
@@ -244,8 +246,8 @@ async def test_confirming_an_unresolved_line_is_refused(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """There is nothing to confirm, and recording one would poison the labels."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
 
     with pytest.raises(ValueError, match="no resolution to confirm"):
@@ -256,8 +258,8 @@ async def test_revising_a_label_does_not_create_a_second_example(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """Duplicates would weight one line more heavily in every future score."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
     wrong = await make_food(session, "the first answer")
     right = await make_food(session, "the second answer")
@@ -275,8 +277,8 @@ async def test_the_split_is_deterministic(
 ) -> None:
     """A random split cannot be reproduced, which makes two runs incomparable
     for reasons that have nothing to do with the resolver."""
-    store = await make_store(session)
-    receipt = await normalized_receipt(session, storage, store=store)
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
     lines = [i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT]
     food = await make_food(session, "a food for splitting")
 
@@ -359,3 +361,58 @@ async def test_a_correction_pointing_at_no_food_is_refused(client: AsyncClient) 
 async def test_correcting_an_unknown_line_is_a_404(client: AsyncClient) -> None:
     response = await client.post("/line-items/98765432/correct", json={"is_nonfood": True})
     assert response.status_code == 404
+
+
+# ── A label must not freeze its receipt ───────────────────────────────────
+
+
+async def test_a_labelled_receipt_can_still_be_re_normalised(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """The guarantee at stake: every stage after extract replays from the
+    stored extraction. A foreign key from the label to the line item turned
+    that into a hard failure once a line had been labelled — normalisation
+    replaces line items wholesale, and the delete was refused.
+    """
+    from ns.pipeline.normalize import normalize_receipt
+
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
+    line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
+    food = await make_food(session, "a food that outlives its line item")
+
+    result = await record_correction(session, line, food_id=food.id, store_id=store.id)
+    example_id = result.example.id
+
+    await normalize_receipt(session, receipt)
+
+    # The label survives; only its provenance pointer is cleared.
+    surviving = await session.get(EvalExample, example_id)
+    assert surviving is not None
+    # The delete happened in SQL; the identity map still holds the old row.
+    await session.refresh(surviving)
+    assert surviving.expected_food_id == food.id
+    assert surviving.normalized_text == line.normalized_text
+    assert surviving.source_line_item_id is None
+
+
+async def test_the_correction_still_applies_after_re_normalisation(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """Rebuilt line items must pick the correction back up on the next resolve."""
+    from ns.pipeline.normalize import normalize_receipt
+
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
+    line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
+    text = line.normalized_text
+    food = await make_food(session, "a food that survives a rebuild")
+    await record_correction(session, line, food_id=food.id, store_id=store.id)
+
+    await normalize_receipt(session, receipt)
+    with patch_resolve():
+        await resolve_receipt(session, receipt)
+
+    rebuilt = next(i for i in await lines_of(session, receipt) if i.normalized_text == text)
+    assert rebuilt.food_id == food.id
+    assert rebuilt.resolution_source is ResolutionSource.CORRECTION_STORE
