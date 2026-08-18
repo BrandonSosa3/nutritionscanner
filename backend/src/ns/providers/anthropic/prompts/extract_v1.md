@@ -25,6 +25,11 @@ order printed:
 - `-15.00` stays `-15.00`
 - Do not add or remove currency symbols, and do not reformat
 
+`amount` is for money only. A figure that is a count, a weight, a percentage,
+or a reference number is not an amount — leave `amount` null on that line. In
+particular, a line such as `TOTAL NUMBER OF ITEMS SOLD = 11` has no monetary
+amount; the count belongs in `item_count_stated`.
+
 ## Line kinds
 
 Classify each printed line:

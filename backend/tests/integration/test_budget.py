@@ -16,7 +16,11 @@ from ns.providers.anthropic.budget import (
 
 pytestmark = pytest.mark.integration
 
-NOW = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
+# A far-future month, deliberately. The guard aggregates over "the current
+# calendar month", so a test pinned to the real current month would sum real
+# LLM calls alongside its own fixtures and fail as soon as the project spends
+# anything.
+NOW = datetime(2099, 6, 15, 12, 0, tzinfo=UTC)
 
 
 async def _record(session: AsyncSession, cost: str, *, when: datetime = NOW) -> None:
@@ -42,7 +46,7 @@ async def test_status_sums_only_the_current_month(session: AsyncSession) -> None
     status = await get_budget_status(session, now=NOW)
 
     assert status.spent_usd == Decimal("0.09")
-    assert status.month.isoformat() == "2026-08-01"
+    assert status.month.isoformat() == "2099-06-01"
 
 
 async def test_call_within_budget_is_allowed(session: AsyncSession) -> None:
