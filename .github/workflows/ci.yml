@@ -66,11 +66,15 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      - name: Lockfile is in sync with pyproject
+        # Fails if a dependency was added without re-locking. Without this,
+        # CI and the Docker image could install different versions than a
+        # developer's machine and nothing in git would show it.
+        run: uv lock --check
+
       - name: Install dependencies
         run: |
-          uv venv --python ${{ env.PYTHON_VERSION }}
-          VIRTUAL_ENV=.venv uv pip install -r pyproject.toml --extra dev
-          VIRTUAL_ENV=.venv uv pip install --no-deps -e .
+          uv sync --frozen --extra dev
           # Put the venv on PATH: Alembic's post-write hook shells out to
           # `ruff` by name, so it must resolve without an explicit path.
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"

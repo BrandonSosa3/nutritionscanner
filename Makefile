@@ -20,10 +20,12 @@ setup: ## Cold-start: create .env, build images, install deps, migrate
 	@echo "Ready. API: http://localhost:8000/health  Docs: http://localhost:8000/docs"
 
 .PHONY: install
-install: ## Install backend dependencies into backend/.venv
-	cd $(BACKEND) && uv venv --python 3.12 \
-		&& VIRTUAL_ENV=.venv uv pip install -r pyproject.toml --extra dev \
-		&& VIRTUAL_ENV=.venv uv pip install --no-deps -e .
+install: ## Install backend dependencies from uv.lock into backend/.venv
+	cd $(BACKEND) && uv sync --frozen --extra dev
+
+.PHONY: lock
+lock: ## Re-resolve dependencies and update uv.lock (after editing pyproject)
+	cd $(BACKEND) && uv lock
 
 # ── Stack ─────────────────────────────────────────────────────────────────
 

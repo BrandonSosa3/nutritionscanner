@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage. The runtime image carries no build toolchain and no uv, runs as
-# a non-root user, and is byte-identical between local dev and production —
-# only the command and environment differ.
+# Three stages. `runtime` is what deploys: no build toolchain, no uv, no dev
+# dependencies, non-root. `dev` adds the tooling needed to generate migrations
+# and run tests, and is what compose builds locally.
+#
+# Every stage installs from uv.lock with --frozen, so the dependency set is
+# byte-identical between a laptop, CI, and production. Resolving from
+# pyproject.toml at build time instead would let a transitive dependency drift
+# between environments without anything changing in git.
 
 # ── Builder ───────────────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS builder
@@ -14,23 +19,30 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies resolve in their own layer so application edits don't
-# invalidate the dependency cache.
-COPY pyproject.toml ./
+# Dependencies resolve in their own layer, so editing application code does
+# not invalidate the dependency cache.
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /app/.venv && \
-    VIRTUAL_ENV=/app/.venv uv pip install -r pyproject.toml --extra dev
+    uv sync --frozen --no-install-project --no-dev
 
 COPY src/ ./src/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+# --no-editable: the package is copied into site-packages rather than linked
+# to /app/src, so the runtime image does not depend on the source tree layout.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    VIRTUAL_ENV=/app/.venv uv pip install --no-deps -e .
+    uv sync --frozen --no-dev --no-editable
 
-# ── Runtime ───────────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm AS runtime
+# ── Dev builder ───────────────────────────────────────────────────────────
+# Same lock, plus dev extras. Alembic's post-write hook shells out to ruff,
+# so migration generation needs them present.
+FROM builder AS dev-builder
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --extra dev --no-editable
 
-# curl is used by the container healthcheck below.
+# ── Runtime base ──────────────────────────────────────────────────────────
+FROM python:3.12-slim-bookworm AS base
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
@@ -39,21 +51,15 @@ RUN apt-get update \
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    RUFF_CACHE_DIR=/tmp/.ruff_cache
 
 WORKDIR /app
 
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --from=builder --chown=app:app /app/src /app/src
-COPY --from=builder --chown=app:app /app/alembic /app/alembic
-COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
-
-# Receipt images land here. Owned by the app user so the container can write
-# without running privileged; mount a volume over it in compose and a real
-# object store in production.
+# Receipt images land here. Owned by the app user so the container writes
+# without privilege; a volume mounts over it locally and object storage
+# replaces it in production.
 RUN mkdir -p /app/data/receipts && chown -R app:app /app/data
-
-USER app
 
 EXPOSE 8000
 
@@ -61,3 +67,19 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
 CMD ["uvicorn", "ns.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ── Production runtime ────────────────────────────────────────────────────
+FROM base AS runtime
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/src /app/src
+COPY --from=builder --chown=app:app /app/alembic /app/alembic
+COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
+USER app
+
+# ── Development runtime ───────────────────────────────────────────────────
+FROM base AS dev
+COPY --from=dev-builder --chown=app:app /app/.venv /app/.venv
+COPY --from=dev-builder --chown=app:app /app/src /app/src
+COPY --from=dev-builder --chown=app:app /app/alembic /app/alembic
+COPY --from=dev-builder --chown=app:app /app/alembic.ini /app/alembic.ini
+USER app

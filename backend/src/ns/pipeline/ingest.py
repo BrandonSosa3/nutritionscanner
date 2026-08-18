@@ -53,6 +53,20 @@ async def ingest_receipt(
         # Idempotent re-upload. The row is untouched — in particular the
         # pipeline status and any corrections downstream of it stand, because
         # the bytes are identical and nothing about the receipt has changed.
+        #
+        # The blob is still checked and rewritten if absent. A row can outlive
+        # its image: a database restored from backup alongside an empty
+        # storage volume leaves rows pointing at files that do not exist.
+        # Re-uploading the original file is the natural way to repair that,
+        # and returning early without writing would silently refuse to.
+        if not store.exists(existing.image_path):
+            log.warning(
+                "ingest.blob_missing_restored",
+                receipt_id=existing.id,
+                key=existing.image_path,
+            )
+            store.write(facts.sha256, facts.extension, data)
+
         log.info(
             "ingest.duplicate_content",
             receipt_id=existing.id,

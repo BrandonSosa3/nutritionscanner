@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -55,8 +56,12 @@ async def test_reupload_of_identical_bytes_is_idempotent(
     assert second.created is False
     assert second.receipt.id == first.receipt.id
 
-    count = len((await session.execute(select(Receipt))).all())
-    assert count == 1
+    # Scoped to this content hash. Counting every row would assume an empty
+    # database, which stops being true the moment real receipts exist.
+    matching = (
+        await session.execute(select(Receipt).where(Receipt.image_sha256 == sha256_hex(data)))
+    ).all()
+    assert len(matching) == 1
 
 
 async def test_different_images_create_separate_receipts(
@@ -73,10 +78,17 @@ async def test_invalid_image_is_rejected_before_any_row_is_written(
     session: AsyncSession, storage: LocalReceiptStorage
 ) -> None:
     """Never persist a receipt we could not even decode."""
-    with pytest.raises(InvalidImageError):
-        await ingest_receipt(session, b"not an image at all" * 100, storage=storage)
+    payload = b"not an image at all" * 100
+    before = (await session.execute(select(func.count()).select_from(Receipt))).scalar_one()
 
-    assert len((await session.execute(select(Receipt))).all()) == 0
+    with pytest.raises(InvalidImageError):
+        await ingest_receipt(session, payload, storage=storage)
+
+    after = (await session.execute(select(func.count()).select_from(Receipt))).scalar_one()
+    assert after == before
+    assert (
+        await session.execute(select(Receipt).where(Receipt.image_sha256 == sha256_hex(payload)))
+    ).first() is None
 
 
 async def test_storage_path_is_derived_from_content_hash(
@@ -125,7 +137,10 @@ async def test_real_receipt_photographs_ingest(
     data = path.read_bytes()
     result = await ingest_receipt(session, data, storage=storage)
 
-    assert result.created is True
+    # `created` is deliberately not asserted: this fixture may already have
+    # been ingested by hand during development, and an idempotent re-ingest
+    # is correct behaviour rather than a failure.
+    assert result.receipt.id is not None
     assert result.facts.width >= 200
     assert result.facts.height >= 200
     assert storage.read(result.receipt.image_path) == data
@@ -175,7 +190,10 @@ async def test_rephotographed_receipt_is_flagged_not_merged(
     assert [m.id for m in matches] == [first.id]
     # Flagged only — nothing was deleted or merged.
     assert second.duplicate_of_receipt_id is None
-    assert len((await session.execute(select(Receipt))).all()) == 2
+    at_this_store = (
+        await session.execute(select(Receipt).where(Receipt.store_id == store.id))
+    ).all()
+    assert len(at_this_store) == 2
 
 
 async def test_duplicate_check_is_inert_before_extraction(
@@ -184,3 +202,26 @@ async def test_duplicate_check_is_inert_before_extraction(
     """With no date or total yet, every receipt would otherwise match."""
     receipt = (await ingest_receipt(session, make_image(), storage=storage)).receipt
     assert await find_probable_duplicates(session, receipt) == []
+
+
+async def test_reupload_repairs_a_missing_blob(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """A row can outlive its image.
+
+    Restoring the database from backup onto an empty storage volume leaves
+    rows pointing at files that no longer exist. Re-uploading the original
+    file must repair that rather than returning early because the row is
+    already there.
+    """
+    data = make_image(color="#0a0a0a")
+    first = await ingest_receipt(session, data, storage=storage)
+
+    storage.delete(first.receipt.image_path)
+    assert not storage.exists(first.receipt.image_path)
+
+    second = await ingest_receipt(session, data, storage=storage)
+
+    assert second.created is False
+    assert second.receipt.id == first.receipt.id
+    assert storage.read(first.receipt.image_path) == data
