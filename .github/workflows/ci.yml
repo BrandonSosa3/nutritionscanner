@@ -114,7 +114,10 @@ jobs:
           rm -f alembic/versions/*ci_drift*.py
 
       - name: Tests (including integration)
-        run: pytest --cov --cov-report=term-missing
+        # `llm` is deselected: those tests make real, billed Anthropic calls.
+        # CI has no key, and giving it one would mean every push spends money.
+        # They are run deliberately, by hand: pytest -m llm
+        run: pytest -m "not llm" --cov --cov-report=term-missing
 
   docker:
     name: Docker image builds

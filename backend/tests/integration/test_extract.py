@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ns.config import get_settings
 from ns.models import LlmCall, Receipt
 from ns.models.enums import PipelineStatus
 from ns.pipeline.extract import extract_receipt
@@ -408,6 +409,8 @@ async def test_real_extraction_of_the_costco_receipt(
     path = RECEIPT_FIXTURES / "04-us-costco.png"
     if not path.is_file():
         pytest.skip("Costco fixture not present")
+    if get_settings().anthropic_api_key is None:
+        pytest.skip("ANTHROPIC_API_KEY is not set")
 
     receipt = (await ingest_receipt(session, path.read_bytes(), storage=storage)).receipt
     outcome = await extract_receipt(session, receipt, storage=storage)
