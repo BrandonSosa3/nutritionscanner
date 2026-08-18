@@ -9,21 +9,26 @@ from sqlmodel import col
 
 from ns.api.schemas import (
     ExtractionResponse,
+    LineItemListResponse,
+    LineItemOut,
     NormalizationResponse,
     ReceiptDetail,
     ReceiptListResponse,
     ReceiptSummary,
     ReceiptUploadResponse,
     ReconciliationResponse,
+    ResolutionResponse,
 )
 from ns.db import get_session
 from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
 from ns.logging import get_logger
-from ns.models import Receipt
+from ns.models import Food, LineItem, Receipt
+from ns.models.enums import LineItemKind, ResolutionSource
 from ns.pipeline.extract import extract_receipt
 from ns.pipeline.ingest import ingest_receipt
 from ns.pipeline.normalize import normalize_receipt
 from ns.pipeline.reconcile import reconcile_receipt
+from ns.pipeline.resolve import RESOLVABLE_KINDS, resolve_receipt
 from ns.providers.anthropic.budget import BudgetExceededError
 from ns.providers.anthropic.client import MissingApiKeyError
 
@@ -251,4 +256,104 @@ async def reconcile(
         delta_cents=result.delta_cents,
         tax_model=result.tax_model,
         report=result.report,
+    )
+
+
+@router.post(
+    "/{receipt_id}/resolve",
+    response_model=ResolutionResponse,
+    summary="Identify what food each line refers to",
+)
+async def resolve(
+    receipt_id: int,
+    force: Annotated[bool, Query(description="Re-resolve lines that already have a food.")] = False,
+    session: AsyncSession = Depends(get_session),
+) -> ResolutionResponse:
+    """Resolve line items to foods: corrections first, then one batched model call.
+
+    Idempotent by default. Re-running after adding a correction fixes the
+    unresolved lines without paying to re-answer the rest — which is the whole
+    point of tier 1 sitting in front of the model.
+
+    This is the only stage that costs money per receipt.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    try:
+        result = await resolve_receipt(session, receipt, force=force)
+    except MissingApiKeyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BudgetExceededError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+
+    return ResolutionResponse(
+        receipt_id=receipt_id,
+        status=receipt.status,
+        by_source=result.by_source,
+        coverage=round(result.coverage, 4),
+        unresolved=result.unresolved_texts,
+        cost_usd=str(result.call.cost_usd) if result.call else "0",
+        latency_ms=result.call.latency_ms if result.call else None,
+    )
+
+
+@router.get(
+    "/{receipt_id}/lines",
+    response_model=LineItemListResponse,
+    summary="The receipt's line items and their resolution state",
+)
+async def list_lines(
+    receipt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> LineItemListResponse:
+    """What the correction queue reads.
+
+    Coverage is computed over *resolvable* lines only. Counting subtotal and
+    tax lines as unresolved would understate a receipt that is in fact fully
+    identified.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    lines = list(
+        (
+            await session.execute(
+                select(LineItem)
+                .where(col(LineItem.receipt_id) == receipt_id)
+                .order_by(col(LineItem.line_index))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    food_ids = {line.food_id for line in lines if line.food_id is not None}
+    names: dict[int, str] = {}
+    if food_ids:
+        foods = (
+            (await session.execute(select(Food).where(col(Food.id).in_(food_ids)))).scalars().all()
+        )
+        names = {food.id: food.canonical_name for food in foods if food.id is not None}
+
+    items: list[LineItemOut] = []
+    resolvable = 0
+    resolved = 0
+    for line in lines:
+        out = LineItemOut.model_validate(line)
+        out.food_name = names.get(line.food_id) if line.food_id is not None else None
+        items.append(out)
+        if line.kind in RESOLVABLE_KINDS or line.kind is LineItemKind.FEE:
+            resolvable += 1
+            if line.resolution_source is not ResolutionSource.UNRESOLVED:
+                resolved += 1
+
+    return LineItemListResponse(
+        receipt_id=receipt_id,
+        items=items,
+        resolved=resolved,
+        total=resolvable,
+        coverage=round(resolved / resolvable, 4) if resolvable else 0.0,
     )

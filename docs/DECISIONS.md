@@ -381,3 +381,78 @@ interpretation rather than a reading.
 **Consequence:** a subtotal-anchored pass makes a narrower claim and says so in
 its own detail text: it confirms the item prices but not the tax or the amount
 paid. The UI must not render it as a full reconciliation.
+
+---
+
+## D22 — `from_receipt` means the paper said it; authority runs correction, receipt, estimate · Settled
+
+`GramsBasis.FROM_RECEIPT` covers anything normalisation read off the printed
+text — a weighed amount *and* a package size in the item name. `per_package`
+and `per_unit_estimate` are rules applied by a correction or the resolver.
+`apply_grams_rule` refuses to overwrite a `from_receipt` figure unless the
+caller passes `override`, which only the correction path does.
+
+**Why:** the resolver returned 500 g for `MONT JACK 2#` and overwrote the
+907.185 g that normalisation had computed from the printed `2#`. Both figures
+were `per_package`, so nothing in the data distinguished a reading of the paper
+from a model's guess. Provenance is what the basis is for.
+
+**Rules out:** treating `per_package` as evidence of anything about where a
+number came from, and any caller other than a correction passing `override`.
+
+**Consequence:** a user can still fix a misread package size — `BANANAS LOOSE
+17KG` is a bin code — because a correction outranks the receipt.
+
+---
+
+## D23 — The resolver returns a per-item rule, never a line total · Settled
+
+`grams_estimate` is the weight of one package or one unit. The system
+multiplies by the line's own quantity.
+
+**Why:** the prompt originally asked for the line total while the code treated
+the answer as a per-package rule and multiplied by quantity a second time.
+Three boxes of 18 eggs resolved to 8.1 kg. Beyond the bug, a per-item rule is
+the same shape a correction stores (D3), so a resolver answer can become a
+correction without reinterpretation, and it stays correct on a future receipt
+that buys a different number of them.
+
+**Rules out:** any grams figure in the system that already has a quantity
+baked into it.
+
+---
+
+## D24 — Eval matches food identity exactly, and reports the strictness · Settled
+
+A prediction is correct when its canonical name resolves to the same `Food.id`
+as the label. No fuzzy matching, no model-judged equivalence.
+
+**Why:** exact match is a strict lower bound — "chicken breast, boneless
+skinless, raw" and "poultry, breast meat, uncooked" score as a miss although
+they name the same food. A strict, reproducible number is worth more than a
+generous one that moves when the judge does, and an LLM judge would add cost
+and non-determinism to the one measurement that exists to be trusted.
+
+**Consequence:** every mistake is listed by name in `ResolverRun.breakdown`, so
+near misses stay visible and the strictness is auditable rather than hidden in
+an aggregate. Canonical-name drift shows up as accuracy loss, which is the
+correct incentive.
+
+**Known limitation, accepted for now:** two resolver runs produced `aluminum
+foil half-size steam pan` and `disposable aluminum half pan` for the same
+Costco item. The unique index cannot catch this — the names genuinely differ.
+The fix is to offer the resolver the existing food list as candidates, which
+prompt caching makes cheap; until then, corrections are what collapse
+duplicates, and the eval number is what makes the drift visible.
+
+---
+
+## D25 — The eval split is deterministic, not random · Settled
+
+Every fourth label goes to the holdout, by position.
+
+**Why:** a random split cannot be reproduced, so two runs differ for reasons
+that have nothing to do with the resolver — which defeats the purpose of
+tracking a number over time. Holdout labels never feed the corrections table
+used at inference, so scoring against them is not scoring the resolver on
+answers it was handed.

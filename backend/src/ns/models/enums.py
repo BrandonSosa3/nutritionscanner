@@ -51,7 +51,13 @@ class GramsBasis(StrEnum):
     because food identity is stable across purchases and weight usually is not.
     """
 
-    FROM_RECEIPT = "from_receipt"  # receipt states the weight; trust it
+    # The receipt printed it — a weighed amount, or a package size in the item
+    # name. Both are the paper speaking, and neither may be overwritten by an
+    # estimate; only a user correction outranks them.
+    FROM_RECEIPT = "from_receipt"
+    # The two below are *rules*, applied by a correction or by the resolver
+    # against this line's own quantity. They are estimates, and rank below
+    # anything the receipt itself stated.
     PER_PACKAGE = "per_package"  # fixed pack size x quantity
     PER_UNIT_ESTIMATE = "per_unit_estimate"  # countable, estimated per item
     DENSITY = "density"  # volume x Food.density_g_per_ml

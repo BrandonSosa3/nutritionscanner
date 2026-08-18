@@ -7,11 +7,20 @@ never appears in a response body or a log line.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ns.models import Receipt
-from ns.models.enums import PipelineStatus, ReconciliationStatus
+from ns.models.enums import (
+    EvalSplit,
+    GramsBasis,
+    LabelSource,
+    LineItemKind,
+    PipelineStatus,
+    ReconciliationStatus,
+    ResolutionSource,
+)
 
 
 class ReceiptSummary(BaseModel):
@@ -146,3 +155,119 @@ class ReconciliationResponse(BaseModel):
     delta_cents: int | None
     tax_model: str
     report: dict[str, object]
+
+
+# ── Resolution and corrections ────────────────────────────────────────────
+
+
+class LineItemOut(BaseModel):
+    """A line item as the correction queue needs to see it.
+
+    Carries the resolution state in full, because the screen this feeds has to
+    say not just what a line resolved to but how confidently and by what route
+    — a store correction and a 0.61 model guess are not the same claim.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    line_index: int
+    raw_text: str
+    normalized_text: str
+    kind: LineItemKind
+    price_cents: int
+    quantity: Decimal | None
+    unit: str | None
+    grams_as_purchased: Decimal | None
+    grams_edible: Decimal | None
+    grams_basis: GramsBasis
+    food_id: int | None
+    food_name: str | None = None
+    resolution_source: ResolutionSource
+    confidence: float | None
+
+
+class LineItemListResponse(BaseModel):
+    receipt_id: int
+    items: list[LineItemOut]
+    resolved: int
+    total: int
+    coverage: float = Field(description="Resolved share of resolvable lines, 0 to 1.")
+
+
+class ResolutionResponse(BaseModel):
+    """The result of resolving a receipt.
+
+    `coverage` is stated here and not buried, because every summary has to say
+    how much of the basket it actually accounts for (principle 6).
+    """
+
+    receipt_id: int
+    status: PipelineStatus
+    by_source: dict[str, int]
+    coverage: float
+    unresolved: list[str]
+    cost_usd: str
+    latency_ms: int | None
+
+
+class CorrectionRequest(BaseModel):
+    """A user's fix for one line.
+
+    `grams_basis` and `grams_value` are a *rule*, never a measured weight
+    (DECISIONS.md D3): "eggs come in 18-count boxes of 50 g each", not "this
+    box weighed 900 g". The rule is replayed against each future line's own
+    quantity.
+    """
+
+    food_id: int | None = None
+    is_nonfood: bool = False
+    grams_basis: GramsBasis = GramsBasis.UNKNOWN
+    grams_value: Decimal | None = None
+    global_scope: bool = Field(
+        default=False,
+        description="Apply at every store rather than only the one on this receipt.",
+    )
+
+
+class CorrectionResponse(BaseModel):
+    line_item_id: int
+    correction_id: int
+    applied_to_line_items: int = Field(
+        description="Lines updated across all receipts, past ones included."
+    )
+    eval_example_id: int
+    split: EvalSplit
+    label_source: LabelSource
+
+
+class EvalRunResponse(BaseModel):
+    """One scored run against a labeled split.
+
+    `precision_at_threshold` matters more than `food_accuracy`: it is how often
+    the resolver is right *when it was confident enough to skip review*.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    run_at: datetime
+    model: str
+    prompt_version: str
+    normalizer_version: str
+    n_examples: int
+    food_accuracy: float
+    grams_within_tolerance: float
+    precision_at_threshold: float
+    confidence_threshold: float
+    expected_calibration_error: float | None
+    cost_usd_per_receipt: float | None
+    latency_p50_ms: int | None
+    latency_p95_ms: int | None
+    breakdown: dict[str, object] | None
+    notes: str | None
+
+
+class EvalRunListResponse(BaseModel):
+    items: list[EvalRunResponse]
+    total: int

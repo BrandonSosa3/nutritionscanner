@@ -26,7 +26,11 @@ class Food(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
 
-    canonical_name: str = Field(index=True, max_length=300)
+    # Unique: two rows for one food would split its price history in half and
+    # make cost per gram of protein quietly wrong for both. Resolution keys on
+    # this name, so uniqueness is what makes "the same food every time" real
+    # rather than a request in a prompt.
+    canonical_name: str = Field(unique=True, index=True, max_length=300)
     category: FoodCategory = Field(
         default=FoodCategory.UNCATEGORIZED,
         sa_column=enum_column(FoodCategory, nullable=False, index=True),

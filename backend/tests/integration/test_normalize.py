@@ -150,7 +150,9 @@ async def test_package_size_in_the_name_becomes_grams(
 
     items = await _items(session, receipt)
     assert items[0].grams_as_purchased == Decimal("500.000")
-    assert items[0].grams_basis is GramsBasis.PER_PACKAGE
+    # FROM_RECEIPT: the size is printed on the paper. PER_PACKAGE is reserved
+    # for a rule applied by a correction or the resolver, which ranks lower.
+    assert items[0].grams_basis is GramsBasis.FROM_RECEIPT
     assert items[0].normalized_text == "smoked viennas"
 
 

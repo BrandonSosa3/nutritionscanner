@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # Where receipt images live. Personal financial records — see .gitignore.
     receipt_storage_path: Path = Path("data/receipts")
 
+    # Below this the resolver's own answer is not treated as an answer: the
+    # line stays unresolved and goes to the correction queue, which is where a
+    # real label comes from. The eval harness reports accuracy at this floor,
+    # so moving it is a measurable decision rather than a hunch.
+    resolution_min_confidence: float = 0.6
+
     # Reconciliation tolerance in cents. A receipt whose line items differ from
     # the printed total by more than this is flagged suspect, never persisted
     # as clean.

@@ -120,7 +120,11 @@ def _derive_grams(item: ExtractedLineItem) -> tuple[Decimal | None, GramsBasis]:
                 count = Decimal(item.quantity) if item.quantity else multiplier
             except (ValueError, ArithmeticError):
                 count = Decimal(1)
-            return (grams * count).quantize(Decimal("0.001")), GramsBasis.PER_PACKAGE
+            # FROM_RECEIPT, not PER_PACKAGE: this size is printed on the
+            # paper. The basis records provenance, and a model estimate
+            # must never be allowed to overwrite something the receipt
+            # actually said.
+            return (grams * count).quantize(Decimal("0.001")), GramsBasis.FROM_RECEIPT
 
     # Volume without a density, a bare count, or nothing at all. Resolution
     # answers this; guessing here would be inventing data.

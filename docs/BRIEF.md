@@ -270,6 +270,23 @@ than refactor later.
 
 ## Amendments
 
+### A6 — Store identity is not yet resolved (open gap, not a decision)
+
+Extraction records `store_name` in the raw transcription, but nothing creates a
+`Store` row, so `Receipt.store_id` is always null. Two consequences, both
+currently live:
+
+- **Tier 1a of resolution never fires.** Store-specific corrections are
+  written, stored, and applied correctly when a receipt has a store — but no
+  receipt does. Every correction made through the API today is effectively
+  global, because the store it is scoped to is null.
+- **Cross-store price comparison (a D17 Phase 2 gate) has nothing to group by.**
+
+This is a gap in the pipeline, not a design decision: store resolution belongs
+between extract and normalize, matching `store_name` and location against
+`Store` and `StoreAlias`. Recorded here so it is not mistaken for intent.
+
+
 Additions and corrections agreed after the original brief. Newest last.
 
 ### A1 — Client is a responsive web app, phone and laptop (2026-08-14)

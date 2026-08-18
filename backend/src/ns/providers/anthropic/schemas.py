@@ -76,3 +76,53 @@ class ExtractedReceipt(BaseModel):
 
     legibility: Legibility
     notes: str | None = Field(default=None, description="Anything ambiguous or unreadable.")
+
+
+# ── Resolution ────────────────────────────────────────────────────────────
+
+FoodCategoryLiteral = Literal[
+    "produce",
+    "protein",
+    "dairy",
+    "grains",
+    "packaged",
+    "beverages",
+    "household",
+    "uncategorized",
+]
+
+# Only the bases the model is in a position to supply. `from_receipt` is not
+# offered: a weight the scale measured is read during normalisation and is
+# never something the resolver should claim. `density` is not offered either —
+# it is derived from the Food's own density once one is known, not asserted
+# per line.
+GramsBasisLiteral = Literal["per_package", "per_unit_estimate", "unknown"]
+
+
+class ResolvedLine(BaseModel):
+    """One receipt line, identified as a food.
+
+    Eight fields, for the same reason `ExtractedLineItem` has eight: the
+    decoding grammar for an unbounded array of objects gets expensive to
+    compile, and a twelve-field version of the extraction schema timed out.
+    """
+
+    line_index: int
+    canonical_name: str | None = Field(
+        default=None,
+        description="Specific food name, or null when the text cannot be identified.",
+    )
+    category: FoodCategoryLiteral
+    is_nonfood: bool
+    grams_estimate: str | None = Field(
+        default=None, description="Grams as a decimal string, or null. Never guess."
+    )
+    grams_basis: GramsBasisLiteral
+    confidence: float = Field(description="0 to 1. Measured against a holdout set, not trusted.")
+    note: str | None = None
+
+
+class ResolutionBatch(BaseModel):
+    """A batch of lines resolved in one call."""
+
+    items: list[ResolvedLine]

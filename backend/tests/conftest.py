@@ -33,6 +33,7 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ["RECEIPT_STORAGE_PATH"] = _TEST_STORAGE
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ns.api.app import create_app
@@ -59,10 +60,20 @@ async def db_connection() -> AsyncGenerator[tuple[AsyncSession, object], None]:
     application code release a savepoint rather than end the outer
     transaction, so request handlers can commit normally and the whole test
     still rolls back.
+
+    Corrections and labels are cleared inside that transaction. They are
+    *inputs* to resolution and evaluation, so a real correction made by hand
+    during development silently changes what a test resolves — one committed
+    correction for `jackorgsalsa` broke sixteen tests that had been asserting
+    against an implicitly empty table. Clearing them inside the transaction
+    gives every test the same starting point and rolls back, leaving the real
+    rows untouched.
     """
     engine = create_async_engine(str(get_settings().database_url))
     connection = await engine.connect()
     transaction = await connection.begin()
+    await connection.execute(text("DELETE FROM eval_example"))
+    await connection.execute(text("DELETE FROM correction"))
     maker = async_sessionmaker(
         bind=connection,
         class_=AsyncSession,
