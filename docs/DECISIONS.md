@@ -483,3 +483,85 @@ variant hits the fast path next time.
 strongest identifier a receipt carries and survives the header being laid out
 differently. `3150 Sharon Rd` must not read as branch 3150, so a bare number is
 never enough.
+
+---
+
+## D27 — USDA identifiers are verified against the live API, not recalled · Settled
+
+Every nutrient number in `domain/nutrition.py` was read off FoodData Central on
+2026-08-18, against fdcId 2646170 (Foundation) and 171077 (SR Legacy).
+
+**Why:** a wrong nutrient number produces a plausible number attached to the
+wrong nutrient — the worst available failure for a system whose purpose is
+nutritional truth, because nothing about the output looks wrong. CLAUDE.md
+already forbids guessing at a USDA field name; this records what the lookup
+found.
+
+**Three things it found that a confident guess would have got wrong:**
+
+- **Energy has no single identifier.** SR Legacy publishes 1008; Foundation
+  foods often publish only 2048 and 2047, the Atwater factors. A lookup for
+  1008 alone returns nothing for a large part of the database, so energy
+  resolves through an ordered fallback.
+- **Folate has four identifiers.** 1177 is `Folate, total`, 1187 `Folate,
+  food`, 1186 `Folic acid`, 1190 `Folate, DFE`. Only DFE accounts for the
+  bioavailability of synthetic folic acid and is the form dietary reference
+  intakes are stated in.
+- **Some entries are group headings.** `Proximates`, `Lipids`, `Minerals`, and
+  `Carbohydrates` arrive as nutrients with no `amount` key at all. Read as
+  zero, they would silently zero out real values.
+
+**Also corrected here:** I had written that the search endpoint returns an
+abbreviated nutrient list and that fetching the detail record was needed to
+recover the vitamins. For the foods checked the two agree exactly. The detail
+call is still made — it is the authoritative record and carries `foodPortions`
+and `foodCategory` — but not for the reason originally claimed.
+
+---
+
+## D28 — A USDA match requires every term of the canonical name · Settled
+
+A candidate is acceptable only when every token of the food's canonical name
+appears in its description, its preparation state does not contradict, and it
+carries nutrient data. Score is a tiebreaker among candidates that already
+pass, never the thing that admits one.
+
+**Why:** against the real search payload for `chicken breast, boneless
+skinless, raw`, `Chicken, thigh, boneless, skinless, raw` scores 0.80 and a
+genuine breast entry scores 0.84. No threshold separates them. What separates
+them is a word the canonical name specified and the thigh does not have.
+Canonical names are short and every token in them is deliberate.
+
+**Rules out:** relevance rank as a match criterion, and any score cutoff as the
+primary gate.
+
+**Consequence, accepted:** this is strict enough that real foods go unmatched —
+`cheese, monterey jack` does not match USDA's `Cheese, monterey`. Those foods
+keep their identity, get no nutrients, and appear in a review queue with the
+ranked candidates recorded, for a one-tap fix that is stored as the user's
+choice. A visible gap beats the wrong food's numbers attached to a year of
+baskets.
+
+---
+
+## D29 — Nutrition is a separate stage from identity, and its absence is shown · Settled
+
+Enrichment runs over the food catalogue, not per receipt. A food with no USDA
+match contributes visible uncovered mass to every summary rather than a silent
+zero.
+
+**Why:** identity is a judgement about receipt text that costs a model call;
+nutrition is a lookup that costs an HTTP request cached forever. Coupling them
+would mean a USDA outage blocked receipts from processing, and a food whose
+identity is settled would have to be re-identified because its nutrition
+arrived late.
+
+**Consequence:** `Food.fdc_id` being unique is load-bearing beyond integrity —
+a second food matching the same USDA entry is the only signal that catches the
+resolver's canonical-name drift, so that collision is recorded as a duplicate
+and surfaced, never raised as an error that aborts a catalogue run.
+
+**Also handled:** FoodData Central returns 404 on its detail endpoint for some
+ids its own search returns (333281 and 321360, observed 2026-08-18). A detail
+failure falls back to the nutrients search already supplied rather than
+discarding the match.

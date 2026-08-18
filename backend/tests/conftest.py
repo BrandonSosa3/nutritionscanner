@@ -43,6 +43,32 @@ from ns.db import get_session
 FIXTURES = Path(__file__).parent / "fixtures"
 RECEIPT_FIXTURES = FIXTURES / "receipts"
 
+# Tables holding state the system *learns* from use: corrections, labels, and
+# the stores it has identified. They are inputs to later stages, so a real one
+# created by hand during development silently changes what a test produces —
+# one committed correction for `jackorgsalsa` broke sixteen tests, and one
+# real Costco store broke six more. Both had been asserting against implicitly
+# empty tables.
+#
+# Cleared per test, inside the transaction that always rolls back. Order
+# matters: `receipt.store_id` and `eval_example.source_line_item_id` reference
+# rows being removed.
+#
+# `food` rows themselves are kept — corrections and line items across the
+# suite reference them, and tests get determinism from get-or-create helpers.
+# What is reset is their *enrichment* state, because `food.fdc_id` is unique:
+# one real enrichment run claiming a USDA entry made every later test that
+# attached the same entry fail on a constraint violation.
+_RESET = (
+    "DELETE FROM eval_example",
+    "DELETE FROM correction",
+    "UPDATE receipt SET store_id = NULL",
+    "DELETE FROM store_alias",
+    "DELETE FROM store",
+    "DELETE FROM food_nutrient",
+    "UPDATE food SET fdc_id = NULL, fdc_data_type = NULL, usda_payload = NULL, fetched_at = NULL",
+)
+
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     shutil.rmtree(_TEST_STORAGE, ignore_errors=True)
@@ -61,19 +87,14 @@ async def db_connection() -> AsyncGenerator[tuple[AsyncSession, object], None]:
     transaction, so request handlers can commit normally and the whole test
     still rolls back.
 
-    Corrections and labels are cleared inside that transaction. They are
-    *inputs* to resolution and evaluation, so a real correction made by hand
-    during development silently changes what a test resolves — one committed
-    correction for `jackorgsalsa` broke sixteen tests that had been asserting
-    against an implicitly empty table. Clearing them inside the transaction
-    gives every test the same starting point and rolls back, leaving the real
-    rows untouched.
+    Learned state is cleared inside that transaction — see `_RESET`. It rolls
+    back with everything else, so the real rows are untouched.
     """
     engine = create_async_engine(str(get_settings().database_url))
     connection = await engine.connect()
     transaction = await connection.begin()
-    await connection.execute(text("DELETE FROM eval_example"))
-    await connection.execute(text("DELETE FROM correction"))
+    for statement in _RESET:
+        await connection.execute(text(statement))
     maker = async_sessionmaker(
         bind=connection,
         class_=AsyncSession,

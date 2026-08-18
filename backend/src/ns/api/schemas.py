@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ns.models import Receipt
 from ns.models.enums import (
     EvalSplit,
+    FoodCategory,
     GramsBasis,
     LabelSource,
     LineItemKind,
@@ -271,3 +272,72 @@ class EvalRunResponse(BaseModel):
 class EvalRunListResponse(BaseModel):
     items: list[EvalRunResponse]
     total: int
+
+
+# ── Foods and nutrition ───────────────────────────────────────────────────
+
+
+class NutrientOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nutrient_code: str
+    amount_per_100g: Decimal
+    unit: str
+
+
+class FoodSummary(BaseModel):
+    """A food and whether it has nutrition behind it yet.
+
+    `has_nutrition` is not cosmetic: a food without it contributes visible
+    uncovered mass to every summary rather than a silent zero.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    canonical_name: str
+    category: FoodCategory
+    fdc_id: int | None
+    fdc_data_type: str | None
+    edible_portion_pct: Decimal
+    density_g_per_ml: Decimal | None
+    nutrient_count: int = 0
+    has_nutrition: bool = False
+
+
+class UsdaCandidateOut(BaseModel):
+    """A FoodData Central entry that was considered, and how it fared."""
+
+    fdc_id: int
+    description: str
+    data_type: str | None
+    score: float
+    recall: float
+    precision: float
+    rejected_reason: str | None
+
+
+class FoodDetail(FoodSummary):
+    nutrients: list[NutrientOut] = Field(default_factory=list)
+    # Recorded at match time. When nothing matched, this is what the review
+    # screen offers the user to choose from.
+    candidates: list[UsdaCandidateOut] = Field(default_factory=list)
+    chosen_by: str | None = None
+
+
+class FoodListResponse(BaseModel):
+    items: list[FoodSummary]
+    total: int
+    without_nutrition: int
+
+
+class EnrichmentResponse(BaseModel):
+    attempted: int
+    enriched: int
+    unmatched: list[str]
+    failed: list[str]
+    coverage: float
+
+
+class UsdaOverrideRequest(BaseModel):
+    fdc_id: int = Field(description="The FoodData Central entry to attach.")
