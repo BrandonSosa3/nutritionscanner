@@ -5,6 +5,7 @@ that could silently mask a missing variable — if a required setting is absent,
 the process fails at import with a message naming the variable.
 """
 
+from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -37,6 +38,13 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5"
 
     usda_api_key: SecretStr | None = None
+
+    # Application-side spend ceiling for the current calendar month, checked
+    # against recorded LlmCall costs before every API call. Independent of the
+    # Anthropic Console limit: this one fails at our boundary with a message
+    # that says what to do, and leaves the receipt queued rather than
+    # half-processed. None disables the guard.
+    monthly_budget_usd: Decimal | None = Decimal("10.00")
 
     # Where receipt images live. Personal financial records — see .gitignore.
     receipt_storage_path: Path = Path("data/receipts")
