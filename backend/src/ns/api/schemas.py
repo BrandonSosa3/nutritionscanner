@@ -341,3 +341,84 @@ class EnrichmentResponse(BaseModel):
 
 class UsdaOverrideRequest(BaseModel):
     fdc_id: int = Field(description="The FoodData Central entry to attach.")
+
+
+# ── Basket summary ────────────────────────────────────────────────────────
+
+
+class CoverageOut(BaseModel):
+    """How much of a basket a total accounts for.
+
+    Weight share is the honest denominator for a nutrient total; spend share
+    is the honest one for a cost. They differ, often sharply — an unresolved
+    bag of rice is a lot of weight and little money.
+    """
+
+    lines_total: int
+    lines_resolved: int
+    lines_with_nutrition: int
+    spend_share: float
+    weight_share: float
+    grams_total: str
+    grams_with_nutrition: str
+    # Why the rest is missing, counted separately because each needs a
+    # different fix: a correction, a USDA match, or a weight.
+    unresolved_lines: int
+    lines_without_nutrition: int
+    lines_without_weight: int
+    is_partial: bool
+
+
+class BasketSummaryResponse(BaseModel):
+    """What a set of receipts *contained*.
+
+    Supply, not intake. These are groceries bought, not food eaten, and the
+    field names say so. A client rendering this as "you consumed" is a bug.
+    """
+
+    receipt_ids: list[int]
+    starts_on: date | None
+    ends_on: date | None
+    currency: str
+    total_spend_cents: int
+    # Amounts as strings: these are Decimals, and a float here would put
+    # binary rounding between the database and the display.
+    nutrients: dict[str, str]
+    units: dict[str, str]
+    coverage: CoverageOut
+    # Built server-side so every client says the same thing, and so none can
+    # render the totals without the caveat (principle 6).
+    headline: str
+
+
+class NutrientCostRow(BaseModel):
+    food_id: int
+    canonical_name: str
+    observations: int
+    median_price_cents_per_100g: str
+    nutrient_per_100g: str
+    cost_cents_per_unit: str
+    from_receipt_weights: int = Field(
+        description="Observations whose weight was read off a receipt rather than estimated."
+    )
+
+
+class NutrientCostResponse(BaseModel):
+    nutrient: str
+    label: str
+    unit: str
+    items: list[NutrientCostRow]
+
+
+class DerivationResponse(BaseModel):
+    """Price observations rebuilt from a receipt's resolved lines.
+
+    The two skip counts are separate because they need different fixes: an
+    unresolved line needs a correction, a line with no weight needs a gram
+    rule.
+    """
+
+    receipt_id: int
+    observations: int
+    skipped_no_grams: int
+    skipped_unresolved: int

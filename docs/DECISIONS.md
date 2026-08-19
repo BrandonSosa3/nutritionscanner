@@ -565,3 +565,48 @@ and surfaced, never raised as an error that aborts a catalogue run.
 ids its own search returns (333281 and 321360, observed 2026-08-18). A detail
 failure falls back to the nutrients search already supplied rather than
 discarding the match.
+
+---
+
+## D30 — Coverage travels with every total, computed two ways · Settled
+
+Every basket total carries the share of **spend** and the share of **weight**
+it was computed from, plus separate counts of why the rest is missing: lines
+not yet identified, foods without nutrition data, and lines without a weight.
+The headline sentence is built server-side.
+
+**Why:** a protein figure computed from 25% of a basket's weight is not a
+protein figure, it is a lower bound with a caveat, and the caveat has to arrive
+with the number rather than in a footnote a client can drop. Building the
+sentence server-side means every client says the same thing and none can
+render the totals without it.
+
+**Two shares, not one,** because they diverge sharply and in opposite
+directions: an unresolved bag of rice is a lot of weight and little money, a
+missing bottle of oil the reverse. The real receipt currently reads *25% of
+weight, 5% of spend* — one number would have hidden which problem it has.
+
+**Three counts, not one,** because each needs a different fix: a correction, a
+USDA match, or a gram rule.
+
+---
+
+## D31 — Cut form is not identity; species and cut are · Settled
+
+USDA matching folds singular and plural together with a crude symmetric stem,
+and exempts words describing how a food was cut — chopped, diced, sliced,
+shredded — from the terms a candidate must contain.
+
+**Why:** requiring them produced false gaps. `onions, chopped, raw` failed
+against USDA's `Onions, raw`, and `eggs` failed against `Egg`. Chopping an
+onion does not change its nutrition per 100 g, and a plural is not a different
+food. The stem is not linguistically correct — `boneless` becomes `boneles` —
+and does not need to be: it is applied to both sides, and symmetry is the only
+property matching requires.
+
+**Rules out:** exempting `ground`, which reads like a cut form and is not.
+Ground turkey is a different cut from turkey breast and differs sharply per
+100 g. Also rules out exempting species: `Egg, duck, whole, fresh, raw` sits in
+the same shortlist as the chicken egg and scores comparably, so `chicken` stays
+required and that food stays in the review queue rather than silently becoming
+duck.

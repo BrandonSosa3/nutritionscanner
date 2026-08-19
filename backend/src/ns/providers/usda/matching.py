@@ -18,6 +18,12 @@ frozen, and dried are different foods nutritionally — cooked chicken is denser
 in everything per 100 g because water left. A candidate whose state contradicts
 the name's state is rejected outright rather than merely scored down.
 
+**Every *distinguishing* term we asked for must be present.** Words describing
+how a food was cut — chopped, diced, sliced — are exempt, because chopping an
+onion does not change its nutrition per 100 g and requiring the word produced
+a false gap against USDA's `Onions, raw`. Singular and plural are folded
+together by a crude symmetric stem, so `eggs` matches `Egg`.
+
 **Every term we asked for must be present.** Scored against the real payload
 for `chicken breast, boneless skinless, raw`, `Chicken, thigh, boneless,
 skinless, raw` scores 0.90 — high enough to pass any threshold that admits the
@@ -41,6 +47,32 @@ _PUNCTUATION = re.compile(r"[^a-z0-9 ]+")
 
 # Words carrying no distinguishing signal in either vocabulary.
 _STOPWORDS = frozenset({"and", "or", "with", "of", "the", "a", "in", "all", "type", "types"})
+
+# Words describing how a food was *cut*, which do not change what it is per
+# 100 g. Chopping an onion does not alter its nutrition, so USDA's `Onions,
+# raw` is the right entry for `onions, chopped, raw` and requiring the word
+# `chopped` to appear only produced a false gap.
+#
+# `ground` is deliberately absent. Ground turkey is a different cut from
+# turkey breast and differs sharply per 100 g; the grinding is incidental but
+# the cut is not.
+_CUT_FORMS = frozenset(
+    {
+        "chopped",
+        "diced",
+        "sliced",
+        "cubed",
+        "shredded",
+        "grated",
+        "halved",
+        "quartered",
+        "minced",
+        "crushed",
+        "whole",
+        "pieces",
+        "chunks",
+    }
+)
 
 # Preparation states. Two different ones in the same comparison is a conflict:
 # raw and cooked are not the same food per 100 g.
@@ -92,9 +124,20 @@ class Candidate:
         return self.rejected_reason is None and self.score >= MIN_SCORE
 
 
+def _singular(word: str) -> str:
+    """A crude, symmetric stem.
+
+    Applied to both sides, so linguistic correctness is beside the point —
+    consistency is what makes `eggs` match `Egg` and `Tomatoes` match
+    `tomatoes`. Both become the same token, whether or not that token is a
+    real word.
+    """
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
 def tokenise(text: str) -> set[str]:
     lowered = _PUNCTUATION.sub(" ", text.lower())
-    return {word for word in lowered.split() if word and word not in _STOPWORDS}
+    return {_singular(word) for word in lowered.split() if word and word not in _STOPWORDS}
 
 
 def _state_conflict(ours: set[str], theirs: set[str]) -> str | None:
@@ -120,13 +163,17 @@ def score_candidate(canonical_name: str, food: ParsedFood) -> Candidate:
         return Candidate(food=food, score=0.0, recall=0.0, precision=0.0, rejected_reason="empty")
 
     shared = ours & theirs
-    recall = len(shared) / len(ours)
+    # Recall is measured over the terms that distinguish a food, not the ones
+    # describing how it was cut.
+    required = {t for t in ours if _singular(t) not in _CUT_FORMS and t not in _CUT_FORMS}
+    required = required or ours
+    recall = len(required & theirs) / len(required)
     precision = len(shared) / len(theirs)
     score = RECALL_WEIGHT * recall + PRECISION_WEIGHT * precision
 
     reason = _state_conflict(ours, theirs)
     if reason is None and recall < MIN_RECALL:
-        missing = ", ".join(sorted(ours - theirs))
+        missing = ", ".join(sorted(required - theirs))
         reason = f"does not mention {missing}"
     if reason is None and not food.nutrients:
         # A match with no nutrient data is not a match worth making: it would

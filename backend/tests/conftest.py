@@ -62,6 +62,9 @@ RECEIPT_FIXTURES = FIXTURES / "receipts"
 _RESET = (
     "DELETE FROM eval_example",
     "DELETE FROM correction",
+    # Derived and rebuildable by design (D9), so clearing it costs nothing.
+    # It references store, so it has to go before the store rows do.
+    "DELETE FROM price_observation",
     "UPDATE receipt SET store_id = NULL",
     "DELETE FROM store_alias",
     "DELETE FROM store",

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from ns.api.schemas import (
+    DerivationResponse,
     ExtractionResponse,
     LineItemListResponse,
     LineItemOut,
@@ -24,6 +25,7 @@ from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
 from ns.logging import get_logger
 from ns.models import Food, LineItem, Receipt
 from ns.models.enums import LineItemKind, ResolutionSource
+from ns.pipeline.derive import derive_receipt
 from ns.pipeline.extract import extract_receipt
 from ns.pipeline.ingest import ingest_receipt
 from ns.pipeline.normalize import normalize_receipt
@@ -356,4 +358,36 @@ async def list_lines(
         resolved=resolved,
         total=resolvable,
         coverage=round(resolved / resolvable, 4) if resolvable else 0.0,
+    )
+
+
+@router.post(
+    "/{receipt_id}/derive",
+    response_model=DerivationResponse,
+    summary="Rebuild this receipt's price observations",
+)
+async def derive(
+    receipt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> DerivationResponse:
+    """Turn resolved lines into price-per-100 g observations.
+
+    Rebuilt every time rather than merged: a correction changes both the price
+    and the weight, so a stale observation would keep feeding the ranking with
+    the old numbers.
+    """
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail=f"No receipt with id {receipt_id}.")
+
+    try:
+        result = await derive_receipt(session, receipt)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return DerivationResponse(
+        receipt_id=receipt_id,
+        observations=result.observed,
+        skipped_no_grams=result.skipped_no_grams,
+        skipped_unresolved=result.skipped_unresolved,
     )

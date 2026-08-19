@@ -119,9 +119,9 @@ def test_rejected_candidates_are_still_reported() -> None:
 # ── The rules, in isolation ───────────────────────────────────────────────
 
 
-def test_every_term_of_the_name_must_appear() -> None:
+def test_every_distinguishing_term_of_the_name_must_appear() -> None:
     assert MIN_RECALL == 1.0
-    assert not score_candidate("tomatoes, diced, canned", synthetic("Tomatoes, canned")).usable
+    assert not score_candidate("beans, black, canned", synthetic("Beans, canned")).usable
 
 
 def test_a_candidate_containing_every_term_is_usable() -> None:
@@ -188,10 +188,34 @@ def test_nothing_matches_when_nothing_is_good_enough() -> None:
 
 
 def test_tokenising_drops_punctuation_and_stopwords() -> None:
+    # `boneless` and `skinless` come back stemmed. The stem is crude and not
+    # trying to be a real word — it is applied identically to both sides, and
+    # that symmetry is the only property that matters for matching.
     assert tokenise("Chicken, breast (boneless and skinless), raw") == {
         "chicken",
         "breast",
-        "boneless",
-        "skinless",
+        "boneles",
+        "skinles",
         "raw",
     }
+
+
+def test_singular_and_plural_are_the_same_token() -> None:
+    """`eggs` has to match USDA's `Egg`. The stem is crude and applied to both
+    sides, so consistency matters and linguistic correctness does not."""
+    assert tokenise("eggs") == tokenise("Egg")
+    assert tokenise("Tomatoes") == tokenise("tomatoes")
+    assert score_candidate("eggs, whole, raw", synthetic("Egg, whole, raw, fresh")).usable
+
+
+def test_how_a_food_was_cut_is_not_part_of_its_identity() -> None:
+    """Chopping an onion does not change its nutrition per 100 g, so USDA's
+    `Onions, raw` is the right entry for `onions, chopped, raw`."""
+    assert score_candidate("onions, chopped, raw", synthetic("Onions, raw")).usable
+    assert score_candidate("carrots, sliced, raw", synthetic("Carrots, raw")).usable
+
+
+def test_ground_is_not_treated_as_a_cut_form() -> None:
+    """Ground turkey is a different cut from turkey breast and differs sharply
+    per 100 g. The grinding is incidental; the cut is not."""
+    assert not score_candidate("turkey, ground, raw", synthetic("Turkey, breast, raw")).usable
