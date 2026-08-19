@@ -37,7 +37,7 @@ from ns.config import get_settings
 from ns.domain.text import NORMALIZER_VERSION
 from ns.logging import get_logger
 from ns.models import EvalExample, Food, LineItem, ResolverRun
-from ns.models.enums import EvalSplit, LineItemKind
+from ns.models.enums import EvalSplit, LineItemKind, LlmStage
 from ns.pipeline.resolve import PROMPT_NAME, resolve_lines
 from ns.providers.anthropic.client import load_prompt
 from ns.providers.anthropic.schemas import ResolvedLine
@@ -248,7 +248,7 @@ async def run_eval(
     for start in range(0, len(examples), BATCH_SIZE):
         chunk = examples[start : start + BATCH_SIZE]
         lines = [_as_line(example, start + offset) for offset, example in enumerate(chunk)]
-        resolved, call = await resolve_lines(session, lines)
+        resolved, call = await resolve_lines(session, lines, stage=LlmStage.EVAL)
         predictions.update(resolved)
         costs.append(call.cost_usd)
         latencies.append(call.latency_ms)

@@ -9,6 +9,9 @@ Full scope, architecture, and phasing: [docs/BRIEF.md](docs/BRIEF.md). The brief
 is the source of truth. Amendments to it go in its Amendments section — never
 deviate silently, but do argue.
 
+External services, API keys, measured per-receipt costs, and the spend guards:
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 Design decisions already settled (schema keys, pipeline order, eval methodology,
 model choice): [docs/DECISIONS.md](docs/DECISIONS.md). Read it before proposing
 a change to any of them — each one has a recorded reason.

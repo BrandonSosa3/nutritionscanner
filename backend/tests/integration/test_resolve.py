@@ -81,7 +81,10 @@ def patch_resolve(*answers: ResolvedLine, echo: bool = False) -> Any:
         session.add(
             LlmCall(
                 receipt_id=kwargs.get("receipt_id"),
-                stage=LlmStage.RESOLVE,
+                # Whatever the caller asked for, like the real client. The
+                # harness passes EVAL so measuring the resolver stays
+                # separable from running it.
+                stage=kwargs.get("stage", LlmStage.RESOLVE),
                 model="claude-opus-5",
                 prompt_version="res123456789",
                 input_tokens=2000,

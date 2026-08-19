@@ -298,12 +298,18 @@ async def resolve_lines(
     store_name: str | None = None,
     receipt_id: int | None = None,
     min_confidence: float | None = None,
+    stage: LlmStage = LlmStage.RESOLVE,
 ) -> tuple[dict[int, ResolvedLine], CallResult[ResolutionBatch]]:
     """One batched model call for a list of lines. Returns results by line index.
 
     Separated from `resolve_receipt` so the eval harness can drive exactly this
     path against labeled examples without touching a receipt or the corrections
     table.
+
+    `stage` is what the recorded LlmCall is filed under. The harness passes
+    `EVAL`, so the cost of *measuring* the resolver stays separable from the
+    cost of *running* it — without that, cost per receipt silently includes
+    eval runs and means nothing.
     """
     _ = min_confidence  # applied by the caller; kept out of the call itself
     prompt = load_prompt(PROMPT_NAME)
@@ -323,7 +329,7 @@ async def resolve_lines(
 
     call = await call_structured(
         session,
-        stage=LlmStage.RESOLVE,
+        stage=stage,
         prompt=prompt,
         content=content,
         output_model=ResolutionBatch,

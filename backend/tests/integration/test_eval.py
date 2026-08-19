@@ -325,3 +325,31 @@ async def test_the_eval_endpoints(client: AsyncClient, session: AsyncSession) ->
 async def test_running_eval_with_no_labels_is_a_conflict(client: AsyncClient) -> None:
     response = await client.post("/eval/runs?split=holdout")
     assert response.status_code in {409, 200}
+
+
+async def test_eval_spend_is_recorded_separately_from_resolution(
+    session: AsyncSession,
+) -> None:
+    """Otherwise cost per receipt silently includes eval runs and means nothing.
+
+    `LlmStage.EVAL` existed and was unused: the harness drives the same code
+    path as a real resolve, so its calls were filed under `resolve` and the two
+    could not be told apart.
+    """
+    from sqlmodel import col, select
+
+    from ns.models import LlmCall
+    from ns.models.enums import LlmStage
+
+    food = await food_named(session, "a food for stage attribution")
+    await label(session, "a stage attribution line", food=food)
+
+    with patch_resolve(resolved(0, "a food for stage attribution")):
+        await run_eval(session)
+
+    recent = (
+        (await session.execute(select(LlmCall).where(col(LlmCall.stage) == LlmStage.EVAL)))
+        .scalars()
+        .all()
+    )
+    assert len(recent) >= 1
