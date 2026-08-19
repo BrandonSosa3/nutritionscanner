@@ -130,5 +130,33 @@ Secrets come from the environment only.
 
 ## Local development
 
-Setup instructions land here as the pieces are built. Target: `docker compose
-up`, `alembic upgrade head`, and a working app from a cold clone.
+From a cold clone, with Docker running:
+
+```bash
+cp .env.example .env      # then paste in the two API keys
+make up                   # postgres, redis, api, worker, web
+make migrate              # alembic upgrade head
+```
+
+| | |
+|---|---|
+| App | <http://localhost:5173> |
+| API docs | <http://localhost:8000/docs> |
+| Postgres | `localhost:5433` — off 5432 so it can't collide with a local one |
+| Redis | `localhost:6380` |
+
+The two keys are `ANTHROPIC_API_KEY` (paid, roughly $0.13 per receipt) and
+`USDA_API_KEY` (free, instant signup). Neither is needed to run the test
+suite, which uses recorded payloads. Full detail, including where each one's
+spend is visible and the three independent spend guards, is in
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+```bash
+make check                # ruff, mypy strict, and the full backend suite
+make test                 # tests only
+make migration m="..."    # autogenerate a migration after a model change
+```
+
+The frontend runs inside compose with live reload. To run it directly on the
+host instead — useful for testing camera capture from a phone on the same
+network — see [frontend/README.md](frontend/README.md).

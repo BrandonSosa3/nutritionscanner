@@ -119,6 +119,27 @@ services:
       disable: true
     command: ["arq", "ns.jobs.worker.WorkerSettings"]
 
+  web:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      # Inside the compose network the API is reachable by service name. The
+      # browser still only ever calls /api on this origin — Vite proxies it —
+      # so no cross-origin request is made in development.
+      VITE_API_TARGET: http://api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src:ro
+      - ./frontend/index.html:/app/index.html:ro
+      # An anonymous volume keeps the image's node_modules, which are built
+      # for Alpine, from being shadowed by the host's macOS binaries.
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   postgres_data:
   redis_data:

@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/* ── Design tokens ────────────────────────────────────────────────────
+   docs/DESIGN.md is the source of truth. Every value here is copied from
+   it, not chosen here.
+
+   The important one is colour: the entire interface is neutrals, and the
+   three semantic colours are reserved exclusively for resolution and
+   reconciliation state. There is no brand colour, and no coloured primary
+   button anywhere in the product.
+   ------------------------------------------------------------------- */
+@theme {
+  --color-bg: #fcfcfd;
+  --color-surface: #ffffff;
+  --color-sunken: #f5f6f7;
+  --color-line: #e5e7ea;
+  --color-line-strong: #cdd1d6;
+  --color-ink: #16181a;
+  --color-ink-2: #5f646a;
+  --color-ink-3: #8b9097;
+
+  --color-resolved: #2f6f4e;
+  --color-attention: #8a6d1f;
+  --color-fail: #a33a32;
+
+  --font-ui: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --radius-card: 8px;
+
+  --text-display: 32px;
+  --text-display--line-height: 38px;
+  --text-title: 22px;
+  --text-title--line-height: 28px;
+  --text-heading: 17px;
+  --text-heading--line-height: 24px;
+  --text-body: 15px;
+  --text-body--line-height: 22px;
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Dark mirrors the same token roles. Only the tokens are redefined — no
+   component ever declares a colour inside a media query, or it would fail
+   to apply in the un-stamped default state. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #0e0f11;
+    --color-surface: #17191c;
+    --color-sunken: #121416;
+    --color-line: #26292e;
+    --color-line-strong: #383c42;
+    --color-ink: #f2f3f4;
+    --color-ink-2: #a0a5ac;
+    --color-ink-3: #71767d;
+    --color-resolved: #5ba37d;
+    --color-attention: #c9a542;
+    --color-fail: #d9736b;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #0e0f11;
+  --color-surface: #17191c;
+  --color-sunken: #121416;
+  --color-line: #26292e;
+  --color-line-strong: #383c42;
+  --color-ink: #f2f3f4;
+  --color-ink-2: #a0a5ac;
+  --color-ink-3: #71767d;
+  --color-resolved: #5ba37d;
+  --color-attention: #c9a542;
+  --color-fail: #d9736b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  -webkit-font-smoothing: antialiased;
+  /* This is a receipt app. Misaligned digits read as broken. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* A ring in the neutral palette — never a coloured glow. */
+:focus-visible {
+  outline: 2px solid var(--color-line-strong);
+  outline-offset: 2px;
+}
+
+/* Motion is functional only. Nothing animates on load, nothing bounces. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

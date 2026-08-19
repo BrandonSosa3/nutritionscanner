@@ -119,6 +119,32 @@ jobs:
         # They are run deliberately, by hand: pytest -m llm
         run: pytest -m "not llm" --cov --cov-report=term-missing
 
+  frontend:
+    name: Frontend — types, lint, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check and build
+        # `npm run build` runs tsc before bundling, so a type error fails here
+        # rather than reaching a deploy.
+        run: npm run build
+
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest

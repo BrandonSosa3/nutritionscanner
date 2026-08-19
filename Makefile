@@ -30,7 +30,7 @@ lock: ## Re-resolve dependencies and update uv.lock (after editing pyproject)
 # ── Stack ─────────────────────────────────────────────────────────────────
 
 .PHONY: up
-up: ## Start the stack (postgres, redis, api, worker)
+up: ## Start the stack (postgres, redis, api, worker, web)
 	docker compose up -d --build
 	@docker compose ps --format "table {{.Service}}\t{{.Status}}"
 
