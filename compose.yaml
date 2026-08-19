@@ -50,6 +50,13 @@ services:
       REDIS_URL: redis://redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       USDA_API_KEY: ${USDA_API_KEY:-}
+      # Passed through explicitly, like every other setting here. The app
+      # inside the container has no .env to read — pydantic-settings looks in
+      # the working directory, which is /app — so a value set only in the
+      # host .env is silently ignored. For a spend ceiling that failure is
+      # worth avoiding: it would read as "my limit is $5" while the app ran
+      # on the $10 default.
+      MONTHLY_BUDGET_USD: ${MONTHLY_BUDGET_USD:-10.00}
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       LOG_LEVEL: INFO
       # Alembic's post-write hook runs ruff on generated migrations. Its
@@ -95,6 +102,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       USDA_API_KEY: ${USDA_API_KEY:-}
+      # The worker spends money too — background extraction is a model call.
+      MONTHLY_BUDGET_USD: ${MONTHLY_BUDGET_USD:-10.00}
       LOG_LEVEL: INFO
     volumes:
       - ./backend/src:/app/src:ro
