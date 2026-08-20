@@ -33,6 +33,9 @@ class ReceiptSummary(BaseModel):
     status: PipelineStatus
     reconciliation_status: ReconciliationStatus
     store_id: int | None
+    # Resolved by the router. A correction's scope is stated to the user as
+    # "applies only at Costco Wholesale", which needs a name, not an id.
+    store_name: str | None = None
     purchased_at: date | None
     total_cents: int | None
     currency: str
@@ -422,3 +425,18 @@ class DerivationResponse(BaseModel):
     observations: int
     skipped_no_grams: int
     skipped_unresolved: int
+
+
+class FoodCreateRequest(BaseModel):
+    """A food the user names because the catalogue doesn't have it yet.
+
+    Category is coarse and optional — it drives the Phase 2 spend breakdown,
+    not nutrition, so leaving it uncategorised costs nothing that matters.
+    """
+
+    canonical_name: str = Field(
+        min_length=1,
+        max_length=300,
+        description="Specific food name, as USDA would describe the ingredient.",
+    )
+    category: FoodCategory = FoodCategory.UNCATEGORIZED

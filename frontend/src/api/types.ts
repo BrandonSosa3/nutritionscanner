@@ -38,6 +38,7 @@ export interface ReceiptSummary {
   status: PipelineStatus;
   reconciliation_status: ReconciliationStatus;
   store_id: number | null;
+  store_name: string | null;
   purchased_at: string | null;
   total_cents: number | null;
   currency: string;
@@ -160,6 +161,14 @@ export interface FoodSummary {
   fdc_id: number | null;
   nutrient_count: number;
   has_nutrition: boolean;
+}
+
+export interface CorrectionBody {
+  food_id?: number | null;
+  is_nonfood?: boolean;
+  grams_basis?: "per_package" | "per_unit_estimate" | "unknown";
+  grams_value?: string | null;
+  global_scope?: boolean;
 }
 
 export interface FoodList {

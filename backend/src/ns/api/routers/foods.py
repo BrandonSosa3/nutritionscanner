@@ -8,13 +8,14 @@ summary able to say what share of its weight it can account for.
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from ns.api.schemas import (
     EnrichmentResponse,
+    FoodCreateRequest,
     FoodDetail,
     FoodListResponse,
     FoodSummary,
@@ -43,6 +44,9 @@ async def _nutrient_counts(session: AsyncSession, food_ids: list[int]) -> dict[i
 
 @router.get("", response_model=FoodListResponse, summary="The food catalogue")
 async def list_foods(
+    q: Annotated[
+        str | None, Query(description="Substring of the food name, case-insensitive.")
+    ] = None,
     without_nutrition: Annotated[
         bool, Query(description="Only foods with no nutrition attached yet.")
     ] = False,
@@ -51,6 +55,12 @@ async def list_foods(
     session: AsyncSession = Depends(get_session),
 ) -> FoodListResponse:
     """Every food resolution has created, and whether nutrition is behind it.
+
+    `q` is what the correction screen searches with — a plain case-insensitive
+    substring, not a ranked search. The catalogue is the foods this user has
+    actually bought, so it stays small enough that substring matching finds
+    things and stays predictable, which matters more here than cleverness:
+    picking the wrong food from a fuzzy list writes a permanent correction.
 
     `without_nutrition=true` is the review queue: foods the matcher would not
     claim automatically, each with candidates recorded for a one-tap fix.
@@ -65,6 +75,8 @@ async def list_foods(
     query = select(Food).order_by(col(Food.canonical_name))
     if without_nutrition:
         query = query.where(col(Food.fdc_id).is_(None))
+    if q and q.strip():
+        query = query.where(col(Food.canonical_name).ilike(f"%{q.strip()}%"))
 
     foods = list((await session.execute(query.limit(limit).offset(offset))).scalars().all())
     counts = await _nutrient_counts(session, [f.id for f in foods if f.id is not None])
@@ -94,6 +106,44 @@ def _candidates_from(payload: Any) -> tuple[list[UsdaCandidateOut], str | None]:
             except ValueError:
                 continue
     return out, chosen_by if isinstance(chosen_by, str) else None
+
+
+@router.post(
+    "",
+    response_model=FoodDetail,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a food the catalogue doesn't have",
+)
+async def create_food(
+    body: Annotated[FoodCreateRequest, Body()],
+    session: AsyncSession = Depends(get_session),
+) -> FoodDetail:
+    """Create a food by name, or return the one that already has that name.
+
+    Get-or-create rather than a hard conflict: the name is the identity, and
+    two rows sharing one would split that food's price history in half and make
+    cost per gram of protein quietly wrong for both. A user typing a name that
+    already exists means "this one", not "make another".
+
+    Nutrition is not fetched here. That is a separate lookup, and a food is
+    useful the moment it has an identity — it contributes visible uncovered
+    mass until USDA data arrives, never a silent zero.
+    """
+    canonical = " ".join(body.canonical_name.strip().lower().split())
+    if not canonical:
+        raise HTTPException(status_code=422, detail="A food needs a name.")
+
+    existing = (
+        await session.execute(select(Food).where(col(Food.canonical_name) == canonical))
+    ).scalar_one_or_none()
+
+    if existing is None:
+        existing = Food(canonical_name=canonical, category=body.category)
+        session.add(existing)
+        await session.flush()
+
+    assert existing.id is not None
+    return await get_food_detail(existing.id, session)
 
 
 @router.get("/{food_id}", response_model=FoodDetail, summary="One food and its nutrition")

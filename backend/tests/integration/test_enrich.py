@@ -355,3 +355,75 @@ async def test_two_names_for_one_food_are_surfaced_not_crashed_into(
     assert second.usda_payload is not None
     assert second.usda_payload["duplicate_of_food_id"] == first.id
     assert second.usda_payload["duplicate_of_name"] == first.canonical_name
+
+
+# ── Search and create, for the correction screen ──────────────────────────
+
+
+async def test_foods_can_be_searched_by_substring(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """What the correction screen searches with. Plain and predictable beats
+    fuzzy: picking the wrong food writes a permanent correction."""
+    await make_food(session, "onions, chopped, raw")
+    await make_food(session, "onions, red, raw")
+    await make_food(session, "chicken breast, boneless skinless, raw")
+    await session.commit()
+
+    response = await client.get("/foods?q=onion")
+
+    assert response.status_code == 200
+    names = {item["canonical_name"] for item in response.json()["items"]}
+    assert names == {"onions, chopped, raw", "onions, red, raw"}
+
+
+async def test_search_ignores_case_and_surrounding_space(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    await make_food(session, "cheese, monterey jack")
+    await session.commit()
+
+    response = await client.get("/foods?q=%20%20MONTEREY%20%20")
+
+    assert [i["canonical_name"] for i in response.json()["items"]] == ["cheese, monterey jack"]
+
+
+async def test_a_search_matching_nothing_is_empty_not_an_error(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/foods?q=zzzzznotafood")
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+async def test_a_food_can_be_created_by_name(client: AsyncClient) -> None:
+    response = await client.post(
+        "/foods", json={"canonical_name": "Kefir, Plain, Whole Milk", "category": "dairy"}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    # Normalised on the way in, so the same food typed differently is one food.
+    assert body["canonical_name"] == "kefir, plain, whole milk"
+    assert body["category"] == "dairy"
+    # Nutrition is a separate lookup; an identity is useful on its own.
+    assert body["has_nutrition"] is False
+
+
+async def test_creating_a_food_that_exists_returns_the_existing_one(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Two rows for one food would split its price history in half. A user
+    typing a name that already exists means "this one", not "make another"."""
+    existing = await make_food(session, "yoghurt, greek, plain")
+    await session.commit()
+
+    response = await client.post("/foods", json={"canonical_name": "  Yoghurt,  Greek,  Plain  "})
+
+    assert response.status_code == 201
+    assert response.json()["id"] == existing.id
+
+
+async def test_a_food_needs_a_name(client: AsyncClient) -> None:
+    assert (await client.post("/foods", json={"canonical_name": "   "})).status_code == 422
+    assert (await client.post("/foods", json={})).status_code == 422

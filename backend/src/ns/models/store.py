@@ -12,7 +12,13 @@ class Store(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
 
+    # Normalised for matching: lowercased, punctuation collapsed, corporate
+    # suffixes dropped. This is a key, not a label.
     name: str = Field(index=True, max_length=200)
+    # As the receipt printed it. Kept because the normalised form is the wrong
+    # thing to show a person — "applies only at costco wholesale" reads as a
+    # bug — and because the original casing cannot be recovered once dropped.
+    display_name: str | None = Field(default=None, max_length=200)
     # The branch, not the chain. Prices differ between branches, and Phase 2
     # cross-store comparison is meaningless if two branches collapse into one.
     location: str | None = Field(default=None, max_length=200)

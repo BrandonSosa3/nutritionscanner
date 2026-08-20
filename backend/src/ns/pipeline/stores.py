@@ -110,9 +110,16 @@ async def resolve_store(
     existing_alias = (
         await session.execute(select(StoreAlias).where(col(StoreAlias.alias_text) == key))
     ).scalar_one_or_none()
+    printed = " ".join(name.split())[:200]
+
     if existing_alias is not None:
         store = await session.get(Store, existing_alias.store_id)
         if store is not None:
+            # Heal a store identified before display names existed. Normalising
+            # is a write path already, and leaving the gap permanent would mean
+            # the oldest stores are the ones that read worst.
+            if not store.display_name:
+                store.display_name = printed
             receipt.store_id = store.id
             return StoreMatch(store=store, created=False, matched_on="alias")
 
@@ -143,9 +150,12 @@ async def resolve_store(
     matched_on = "new" if match is None else ("branch_number" if number else "location")
 
     created = match is None
+    if match is not None and not match.display_name:
+        match.display_name = printed
     if match is None:
         match = Store(
             name=normalised_name,
+            display_name=printed,
             location=location[:200] if location else None,
             currency=receipt.currency,
         )

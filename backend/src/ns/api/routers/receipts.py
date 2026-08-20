@@ -23,7 +23,7 @@ from ns.api.schemas import (
 from ns.db import get_session
 from ns.domain.images import MAX_IMAGE_BYTES, InvalidImageError
 from ns.logging import get_logger
-from ns.models import Food, LineItem, Receipt
+from ns.models import Food, LineItem, Receipt, Store
 from ns.models.enums import LineItemKind, ResolutionSource
 from ns.pipeline.derive import derive_receipt
 from ns.pipeline.extract import extract_receipt
@@ -98,6 +98,21 @@ async def upload_receipt(
     )
 
 
+async def _store_names(session: AsyncSession, receipts: list[Receipt]) -> dict[int, str]:
+    """Store names for a set of receipts, in one query.
+
+    A lookup per receipt would be a query per row in the list — the classic
+    N+1, invisible with five receipts and painful with five hundred.
+    """
+    store_ids = {r.store_id for r in receipts if r.store_id is not None}
+    if not store_ids:
+        return {}
+    stores = (
+        (await session.execute(select(Store).where(col(Store.id).in_(store_ids)))).scalars().all()
+    )
+    return {store.id: store.display_name or store.name for store in stores if store.id is not None}
+
+
 @router.get("", response_model=ReceiptListResponse, summary="List receipts")
 async def list_receipts(
     session: AsyncSession = Depends(get_session),
@@ -121,12 +136,16 @@ async def list_receipts(
         .limit(limit)
         .offset(offset)
     )
-    return ReceiptListResponse(
-        items=[ReceiptSummary.of(r) for r in rows.scalars().all()],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    receipts = list(rows.scalars().all())
+    names = await _store_names(session, receipts)
+
+    items = []
+    for receipt in receipts:
+        summary = ReceiptSummary.of(receipt)
+        summary.store_name = names.get(receipt.store_id or 0)
+        items.append(summary)
+
+    return ReceiptListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{receipt_id}", response_model=ReceiptDetail, summary="Get one receipt")
@@ -140,7 +159,9 @@ async def get_receipt(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No receipt with id {receipt_id}.",
         )
-    return ReceiptDetail.of(receipt)
+    detail = ReceiptDetail.of(receipt)
+    detail.store_name = (await _store_names(session, [receipt])).get(receipt.store_id or 0)
+    return detail
 
 
 @router.post(

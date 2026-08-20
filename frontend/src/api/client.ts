@@ -10,7 +10,9 @@
 import type {
   BasketSummary,
   BudgetStatus,
+  CorrectionBody,
   FoodList,
+  FoodSummary,
   LineItemList,
   NutrientCost,
   ReceiptDetail,
@@ -96,10 +98,7 @@ export const api = {
 
   lines: (id: number) => request<LineItemList>(`/receipts/${id}/lines`),
 
-  correct: (
-    lineItemId: number,
-    body: { food_id?: number | null; is_nonfood?: boolean },
-  ) =>
+  correct: (lineItemId: number, body: CorrectionBody) =>
     request<{ applied_to_line_items: number }>(
       `/line-items/${lineItemId}/correct`,
       {
@@ -128,4 +127,14 @@ export const api = {
 
   foods: (withoutNutrition = false) =>
     request<FoodList>(`/foods?without_nutrition=${withoutNutrition}`),
+
+  searchFoods: (query: string) =>
+    request<FoodList>(`/foods?limit=20&q=${encodeURIComponent(query)}`),
+
+  createFood: (canonicalName: string) =>
+    request<FoodSummary>("/foods", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ canonical_name: canonicalName }),
+    }),
 };

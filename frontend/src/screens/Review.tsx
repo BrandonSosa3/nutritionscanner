@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { LineItem, LineItemList, ReceiptDetail } from "../api/types";
+import { CorrectionSheet } from "../components/CorrectionSheet";
 import { Button, Card, Chip, ErrorNote, Money, Skeleton } from "../components/ui";
 
 const NEEDS_REVIEW_BELOW = 0.8;
@@ -37,6 +38,8 @@ export function Review({ receiptId }: { receiptId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
+  const [correcting, setCorrecting] = useState<number | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -61,6 +64,7 @@ export function Review({ receiptId }: { receiptId: number }) {
     try {
       await api.confirm(line.id);
       await load();
+      setApplied("Confirmed. That's now a labelled example the resolver is scored against.");
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Couldn't save that.");
     } finally {
@@ -78,6 +82,12 @@ export function Review({ receiptId }: { receiptId: number }) {
     <div className="flex flex-col gap-6">
       <Header receipt={receipt} lines={lines} />
 
+      {applied && (
+        <Card accent="resolved">
+          <p className="text-body">{applied}</p>
+        </Card>
+      )}
+
       {queue.length === 0 ? (
         <Card accent="resolved">
           <p className="text-body">
@@ -90,14 +100,36 @@ export function Review({ receiptId }: { receiptId: number }) {
             {queue.length === 1 ? "1 item needs you" : `${queue.length} items need you`}
           </h2>
           <div className="flex flex-col gap-3">
-            {queue.map((line) => (
-              <QueueItem
-                key={line.id}
-                line={line}
-                busy={busy === line.id}
-                onConfirm={() => void confirm(line)}
-              />
-            ))}
+            {queue.map((line) =>
+              correcting === line.id ? (
+                <CorrectionSheet
+                  key={line.id}
+                  line={line}
+                  storeName={receipt.store_name}
+                  onCancel={() => setCorrecting(null)}
+                  onSaved={(appliedTo) => {
+                    setCorrecting(null);
+                    setApplied(
+                      appliedTo === 1
+                        ? "Saved. Applied to this line, and to every future receipt with it."
+                        : `Saved. Applied to ${appliedTo} lines across your receipts, and to every future one.`,
+                    );
+                    void load();
+                  }}
+                />
+              ) : (
+                <QueueItem
+                  key={line.id}
+                  line={line}
+                  busy={busy === line.id}
+                  onConfirm={() => void confirm(line)}
+                  onChange={() => {
+                    setApplied(null);
+                    setCorrecting(line.id);
+                  }}
+                />
+              ),
+            )}
           </div>
         </section>
       )}
@@ -116,7 +148,19 @@ export function Review({ receiptId }: { receiptId: number }) {
         {showAll && (
           <div className="overflow-hidden rounded-card border border-line bg-surface">
             {basket.map((line) => (
-              <Row key={line.id} line={line} />
+              <Row
+                key={line.id}
+                line={line}
+                onChange={
+                  line.kind === "product" || line.kind === "unknown"
+                    ? () => {
+                        setApplied(null);
+                        setCorrecting(line.id);
+                        setShowAll(false);
+                      }
+                    : undefined
+                }
+              />
             ))}
           </div>
         )}
@@ -177,10 +221,12 @@ function QueueItem({
   line,
   busy,
   onConfirm,
+  onChange,
 }: {
   line: LineItem;
   busy: boolean;
   onConfirm: () => void;
+  onChange: () => void;
 }) {
   const unresolved = line.resolution_source === "unresolved";
 
@@ -201,7 +247,7 @@ function QueueItem({
         )}
       </p>
       <div className="flex gap-2 pt-1">
-        <Button full disabled={busy}>
+        <Button full onClick={onChange} disabled={busy}>
           Change
         </Button>
         <Button variant="primary" full onClick={onConfirm} disabled={busy || unresolved}>
@@ -212,11 +258,11 @@ function QueueItem({
   );
 }
 
-function Row({ line }: { line: LineItem }) {
+function Row({ line, onChange }: { line: LineItem; onChange?: () => void }) {
   const attention = needsReview(line);
   const grams = line.grams_as_purchased;
 
-  return (
+  const body = (
     <div
       className={`grid grid-cols-[1fr_auto] gap-x-3 border-b border-line px-3 py-3 last:border-b-0 ${
         attention ? "border-l-2 border-l-attention bg-attention/[0.06]" : "border-l-2 border-l-transparent"
@@ -236,6 +282,16 @@ function Row({ line }: { line: LineItem }) {
         <Money cents={line.price_cents} />
       </div>
     </div>
+  );
+
+  // A confident wrong answer never reaches the queue, so every product line
+  // stays correctable from the full list.
+  return onChange ? (
+    <button type="button" onClick={onChange} className="w-full text-left">
+      {body}
+    </button>
+  ) : (
+    body
   );
 }
 

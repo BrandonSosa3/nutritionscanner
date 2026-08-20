@@ -206,3 +206,55 @@ async def test_a_receipt_with_no_store_name_normalises_anyway(
 
     assert receipt.store_id is None
     assert len(result.line_items) == 15
+
+
+async def test_the_printed_store_name_is_kept_for_display(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """`name` is normalised for matching and is a key, not a label. Rendering
+    it to a person produced "applies only at costco wholesale"."""
+    receipt = await bare_receipt(session, storage, "white")
+
+    match = await resolve_store(session, receipt, "COSTCO WHOLESALE", "Thornton #629")
+
+    assert match is not None
+    assert match.store.name == "costco wholesale"
+    assert match.store.display_name == "COSTCO WHOLESALE"
+
+
+async def test_a_store_identified_before_this_falls_back_to_the_key(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """No backfill was run, so older stores have no display name."""
+    from ns.models import Store
+
+    store = Store(name="spar", display_name=None)
+    session.add(store)
+    await session.flush()
+
+    assert (store.display_name or store.name) == "spar"
+
+
+async def test_an_older_store_fills_in_its_name_on_the_next_receipt(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """Healing in code rather than a SQL backfill: the value comes from a real
+    printed header instead of a guess made by re-casing the key."""
+    from ns.models import Store, StoreAlias
+    from ns.pipeline.stores import alias_key
+
+    store = Store(name="costco wholesale", location="Thornton #629", display_name=None)
+    session.add(store)
+    await session.flush()
+    session.add(
+        StoreAlias(store_id=store.id, alias_text=alias_key("COSTCO WHOLESALE", "Thornton #629"))
+    )
+    await session.flush()
+
+    receipt = await bare_receipt(session, storage, "white")
+    match = await resolve_store(session, receipt, "COSTCO WHOLESALE", "Thornton #629")
+
+    assert match is not None
+    assert match.matched_on == "alias"
+    assert match.store.id == store.id
+    assert match.store.display_name == "COSTCO WHOLESALE"
