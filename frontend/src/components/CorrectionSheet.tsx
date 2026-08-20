@@ -106,14 +106,69 @@ export function CorrectionSheet({
     <Card>
       <div className="flex flex-col gap-1">
         <p className="font-mono text-caption text-ink-3">{line.raw_text}</p>
+
+        {/* Where you are starting from. Without this the sheet gives no way to
+            tell whether you are changing something or confirming it, which is
+            most confusing on exactly the lines that are already right. */}
+        {line.food_name ? (
+          <p className="text-body">
+            Currently{" "}
+            <span className="font-medium">{line.food_name}</span>
+            {line.confidence !== null && (
+              <span className="text-ink-2">
+                {" "}
+                · {Math.round(line.confidence * 100)}% confident
+              </span>
+            )}
+            {line.grams_as_purchased && (
+              <span className="text-ink-2">
+                {" "}
+                · {Number(line.grams_as_purchased).toFixed(0)} g
+              </span>
+            )}
+          </p>
+        ) : (
+          <p className="text-body text-ink-2">Not identified yet.</p>
+        )}
+
         <p className="text-label text-ink-2">
-          What is this? Your answer is applied to every receipt with this line,
-          past ones included.
+          {line.food_name
+            ? "Change the food, add a weight, or both. Whatever you save is applied to every receipt with this line, past ones included."
+            : "What is this? Your answer is applied to every receipt with this line, past ones included."}
         </p>
       </div>
 
+      {line.food_id !== null && line.food_name && (
+        <button
+          type="button"
+          onClick={() =>
+            setChoice({
+              kind: "food",
+              food: {
+                id: line.food_id as number,
+                canonical_name: line.food_name as string,
+                category: "uncategorized",
+                fdc_id: null,
+                nutrient_count: 0,
+                has_nutrition: false,
+              },
+            })
+          }
+          className={`min-h-[44px] rounded-[6px] border border-line px-3 py-2 text-left ${
+            choice?.kind === "food" && choice.food.id === line.food_id ? "bg-sunken" : ""
+          }`}
+        >
+          <span className="text-body">Keep {line.food_name}</span>
+          <span className="block text-caption text-ink-2">
+            The food is right — I only want to set a weight.
+          </span>
+        </button>
+      )}
+
       <label className="flex flex-col gap-2 pt-2">
-        <span className="text-label font-medium">Find a food</span>
+        <span className="text-label font-medium">
+          {line.food_name ? "Or pick a different food" : "Find a food"}
+        </span>
         <input
           type="search"
           value={query}
@@ -187,6 +242,11 @@ export function CorrectionSheet({
           <p className="text-caption text-ink-2">
             A rule, not this purchase — “comes in 500 g packs”. It's multiplied
             by the quantity on each receipt, so buying three gives 1 500 g.
+          </p>
+          <p className="text-caption text-ink-2">
+            Only fill this in if you know it, from the package or a scale.
+            Leaving it blank keeps the line honest; a guess here is replayed
+            onto every future receipt with this item.
           </p>
           <div className="flex flex-wrap gap-2">
             <input
