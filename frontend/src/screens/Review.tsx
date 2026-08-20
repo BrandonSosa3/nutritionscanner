@@ -77,6 +77,29 @@ export function Review({ receiptId }: { receiptId: number }) {
 
   const basket = lines.items.filter(isBasketLine);
   const queue = basket.filter(needsReview);
+  const queued = new Set(queue.map((line) => line.id));
+
+  // The sheet renders where the line is — inside the queue for a line that
+  // needs review, inside the full list otherwise. Rendering it only in the
+  // queue meant tapping a confidently-resolved row set the state, collapsed
+  // the list, and showed nothing at all.
+  const correctionSheet = (line: LineItem) => (
+    <CorrectionSheet
+      key={line.id}
+      line={line}
+      storeName={receipt.store_name}
+      onCancel={() => setCorrecting(null)}
+      onSaved={(appliedTo) => {
+        setCorrecting(null);
+        setApplied(
+          appliedTo === 1
+            ? "Saved. Applied to this line, and to every future receipt with it."
+            : `Saved. Applied to ${appliedTo} lines across your receipts, and to every future one.`,
+        );
+        void load();
+      }}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,21 +125,7 @@ export function Review({ receiptId }: { receiptId: number }) {
           <div className="flex flex-col gap-3">
             {queue.map((line) =>
               correcting === line.id ? (
-                <CorrectionSheet
-                  key={line.id}
-                  line={line}
-                  storeName={receipt.store_name}
-                  onCancel={() => setCorrecting(null)}
-                  onSaved={(appliedTo) => {
-                    setCorrecting(null);
-                    setApplied(
-                      appliedTo === 1
-                        ? "Saved. Applied to this line, and to every future receipt with it."
-                        : `Saved. Applied to ${appliedTo} lines across your receipts, and to every future one.`,
-                    );
-                    void load();
-                  }}
-                />
+                correctionSheet(line)
               ) : (
                 <QueueItem
                   key={line.id}
@@ -147,21 +156,28 @@ export function Review({ receiptId }: { receiptId: number }) {
 
         {showAll && (
           <div className="overflow-hidden rounded-card border border-line bg-surface">
-            {basket.map((line) => (
-              <Row
-                key={line.id}
-                line={line}
-                onChange={
-                  line.kind === "product" || line.kind === "unknown"
-                    ? () => {
-                        setApplied(null);
-                        setCorrecting(line.id);
-                        setShowAll(false);
-                      }
-                    : undefined
-                }
-              />
-            ))}
+            {basket.map((line) =>
+              // A queued line already shows its sheet above; rendering a
+              // second one here would duplicate it.
+              correcting === line.id && !queued.has(line.id) ? (
+                <div key={line.id} className="p-3">
+                  {correctionSheet(line)}
+                </div>
+              ) : (
+                <Row
+                  key={line.id}
+                  line={line}
+                  onChange={
+                    line.kind === "product" || line.kind === "unknown"
+                      ? () => {
+                          setApplied(null);
+                          setCorrecting(line.id);
+                        }
+                      : undefined
+                  }
+                />
+              ),
+            )}
           </div>
         )}
       </section>
