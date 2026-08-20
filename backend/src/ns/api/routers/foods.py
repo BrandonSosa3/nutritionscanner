@@ -20,13 +20,16 @@ from ns.api.schemas import (
     FoodListResponse,
     FoodSummary,
     NutrientOut,
+    UsdaCandidateListResponse,
     UsdaCandidateOut,
     UsdaOverrideRequest,
 )
 from ns.db import get_session
 from ns.models import Food, FoodNutrient
-from ns.pipeline.enrich import enrich_catalogue, enrich_food, set_food_usda
-from ns.providers.usda.client import MissingUsdaKeyError, UsdaError
+from ns.pipeline.enrich import SEARCH_PAGE_SIZE, enrich_catalogue, enrich_food, set_food_usda
+from ns.providers.usda.client import MissingUsdaKeyError, UsdaError, search_foods
+from ns.providers.usda.matching import rank_candidates
+from ns.providers.usda.parsing import parse_food
 
 router = APIRouter(prefix="/foods", tags=["foods"])
 
@@ -191,6 +194,69 @@ async def enrich(
         unmatched=result.unmatched,
         failed=result.failed,
         coverage=round(result.coverage, 4),
+    )
+
+
+@router.get(
+    "/{food_id}/usda-candidates",
+    response_model=UsdaCandidateListResponse,
+    summary="Search FoodData Central for this food",
+)
+async def usda_candidates(
+    food_id: int,
+    q: Annotated[
+        str | None,
+        Query(description="Search terms. Defaults to the food's own name."),
+    ] = None,
+    session: AsyncSession = Depends(get_session),
+) -> UsdaCandidateListResponse:
+    """Ranked candidates, scored but not saved.
+
+    The candidates recorded at match time all came from one search of the
+    food's own name. When the right entry is not among them the user would
+    otherwise be stuck, so `q` lets them search in USDA's vocabulary rather
+    than ours — `Egg, whole, raw` finds what `eggs, chicken, whole, raw` does
+    not.
+
+    Rejected candidates are returned too, with the reason. The automatic
+    matcher is strict on purpose, and a person can see that `Egg, duck` was
+    excluded for naming a different species and decide for themselves.
+
+    Responses are cached on disk, so repeating a search costs no quota.
+    """
+    food = await session.get(Food, food_id)
+    if food is None:
+        raise HTTPException(status_code=404, detail=f"No food with id {food_id}.")
+
+    query = (q or food.canonical_name).strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="Nothing to search for.")
+
+    try:
+        payload = await search_foods(query, page_size=SEARCH_PAGE_SIZE)
+    except MissingUsdaKeyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UsdaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    parsed = [p for hit in (payload.get("foods") or []) if (p := parse_food(hit)) is not None]
+    ranked = rank_candidates(food.canonical_name, parsed)
+
+    return UsdaCandidateListResponse(
+        food_id=food_id,
+        queried=query,
+        items=[
+            UsdaCandidateOut(
+                fdc_id=c.food.fdc_id,
+                description=c.food.description,
+                data_type=c.food.data_type,
+                score=c.score,
+                recall=c.recall,
+                precision=c.precision,
+                rejected_reason=c.rejected_reason,
+            )
+            for c in ranked
+        ],
     )
 
 

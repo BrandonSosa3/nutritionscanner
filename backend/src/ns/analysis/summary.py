@@ -38,9 +38,15 @@ _AMOUNT_PRECISION = Decimal("0.0001")
 class Coverage:
     """How much of a basket a total actually accounts for.
 
-    Weight coverage is the honest denominator for a nutrient total; spend
-    coverage is the honest one for a cost. They differ, often sharply — an
-    unresolved bag of rice is a lot of weight and little money.
+    **Spend is the only complete denominator.** Every line has a price, so
+    `spend_share` really is a share of the whole basket.
+
+    `weight_share` is a share of the weight we *know* — lines with no weight
+    at all are absent from both sides of it. That makes it flattering on its
+    own: a basket where only the cheese was weighed reported "100% of this
+    basket's weight" while four lines went uncounted. It is kept because it
+    says something useful about the mass that was measured, and it travels
+    with `lines_without_weight` so it can never be read as the whole basket.
     """
 
     lines_total: int = 0
@@ -69,12 +75,23 @@ class Coverage:
 
     @property
     def weight_share(self) -> float:
+        """Share of *known* weight, not of the basket. See the class docstring."""
         return float(self.grams_with_nutrition / self.grams_total) if self.grams_total else 0.0
 
     @property
+    def line_share(self) -> float:
+        """Share of lines contributing to the totals. A complete denominator."""
+        return self.lines_with_nutrition / self.lines_total if self.lines_total else 0.0
+
+    @property
     def is_partial(self) -> bool:
-        """Whether the headline has to lead with the caveat."""
-        return self.spend_share < 0.999 or self.weight_share < 0.999
+        """Whether the headline has to lead with the caveat.
+
+        Judged on the two complete denominators. Weight share is deliberately
+        not consulted: it reads 100% whenever every weighed line has nutrition,
+        however many lines were never weighed at all.
+        """
+        return self.spend_share < 0.999 or self.line_share < 0.999
 
 
 @dataclass(frozen=True, slots=True)

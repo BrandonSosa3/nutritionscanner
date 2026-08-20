@@ -11,8 +11,10 @@ import type {
   BasketSummary,
   BudgetStatus,
   CorrectionBody,
+  FoodDetail,
   FoodList,
   FoodSummary,
+  UsdaCandidateList,
   LineItemList,
   NutrientCost,
   ReceiptDetail,
@@ -130,6 +132,20 @@ export const api = {
 
   searchFoods: (query: string) =>
     request<FoodList>(`/foods?limit=20&q=${encodeURIComponent(query)}`),
+
+  food: (id: number) => request<FoodDetail>(`/foods/${id}`),
+
+  usdaCandidates: (foodId: number, q?: string) =>
+    request<UsdaCandidateList>(
+      `/foods/${foodId}/usda-candidates${q ? `?q=${encodeURIComponent(q)}` : ""}`,
+    ),
+
+  setUsda: (foodId: number, fdcId: number) =>
+    request<FoodDetail>(`/foods/${foodId}/usda`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fdc_id: fdcId }),
+    }),
 
   createFood: (canonicalName: string) =>
     request<FoodSummary>("/foods", {

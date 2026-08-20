@@ -106,7 +106,10 @@ export interface Coverage {
   lines_total: number;
   lines_resolved: number;
   lines_with_nutrition: number;
+  /** Complete denominators: every line has a price, and every line is a line. */
   spend_share: number;
+  line_share: number;
+  /** Share of *known* weight — unweighed lines are absent from both sides. */
   weight_share: number;
   grams_total: string;
   grams_with_nutrition: string;
@@ -175,4 +178,33 @@ export interface FoodList {
   items: FoodSummary[];
   total: number;
   without_nutrition: number;
+}
+
+export interface UsdaCandidate {
+  fdc_id: number;
+  description: string;
+  data_type: string | null;
+  score: number;
+  recall: number;
+  precision: number;
+  /** Null when the matcher would accept it. Otherwise why it was excluded. */
+  rejected_reason: string | null;
+}
+
+export interface UsdaCandidateList {
+  food_id: number;
+  queried: string;
+  items: UsdaCandidate[];
+}
+
+export interface Nutrient {
+  nutrient_code: string;
+  amount_per_100g: string;
+  unit: string;
+}
+
+export interface FoodDetail extends FoodSummary {
+  nutrients: Nutrient[];
+  candidates: UsdaCandidate[];
+  chosen_by: string | null;
 }

@@ -62,6 +62,7 @@ async def basket_summary(
             lines_resolved=coverage.lines_resolved,
             lines_with_nutrition=coverage.lines_with_nutrition,
             spend_share=round(coverage.spend_share, 4),
+            line_share=round(coverage.line_share, 4),
             weight_share=round(coverage.weight_share, 4),
             grams_total=str(coverage.grams_total),
             grams_with_nutrition=str(coverage.grams_with_nutrition),
@@ -91,12 +92,17 @@ def _headline(coverage: Coverage) -> str:
     if coverage.lines_without_nutrition:
         reasons.append(f"{coverage.lines_without_nutrition} without nutrition data")
     if coverage.lines_without_weight:
-        reasons.append(f"{coverage.lines_without_weight} without a weight")
-    detail = f" ({', '.join(reasons)})" if reasons else ""
+        reasons.append(f"{coverage.lines_without_weight} with no weight")
+    detail = f" — {', '.join(reasons)}" if reasons else ""
 
+    # Spend leads because it is the only complete denominator: every line has a
+    # price. Weight share is a share of the weight we *know*, which flatters
+    # itself when lines are unweighed — a basket where only the cheese was
+    # weighed reported "100% of this basket's weight" with four lines
+    # uncounted. It is not in the headline for that reason.
     return (
-        f"These totals cover {coverage.weight_share:.0%} of this basket's weight "
-        f"and {coverage.spend_share:.0%} of its spend"
+        f"These totals cover {coverage.spend_share:.0%} of this basket's spend, "
+        f"from {coverage.lines_with_nutrition} of {coverage.lines_total} lines"
         f"{detail}. Everything below is a lower bound."
     )
 

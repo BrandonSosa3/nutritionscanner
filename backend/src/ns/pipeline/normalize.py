@@ -21,7 +21,7 @@ from decimal import Decimal
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
+from sqlmodel import col, select
 
 from ns.domain.money import MoneyParseError, parse_money_to_cents
 from ns.domain.text import NORMALIZER_VERSION, normalise
@@ -141,6 +141,24 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
 
     extraction = ExtractedReceipt.model_validate(receipt.raw_extraction)
 
+    # Resolution is carried across the rebuild for lines whose text is
+    # unchanged. Replacing line items wholesale used to discard it, which made
+    # an innocuous re-normalise — after a store fix, or a normaliser change
+    # affecting other receipts — silently cost a paid model call to redo.
+    #
+    # Keyed on (line_index, normalized_text), so nothing carries when the
+    # normaliser actually changed what a line reduces to, or when the receipt
+    # was re-extracted. In both cases the old answer was about different text
+    # and has no claim on the new line.
+    previous = {
+        (item.line_index, item.normalized_text): item
+        for item in (
+            await session.execute(select(LineItem).where(col(LineItem.receipt_id) == receipt.id))
+        )
+        .scalars()
+        .all()
+    }
+
     # Idempotent: replace rather than append, so re-running after a normaliser
     # change leaves exactly one set of line items.
     await session.execute(delete(LineItem).where(col(LineItem.receipt_id) == receipt.id))
@@ -168,21 +186,40 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
         # A measured quantity carries its unit; a bare count carries none.
         count = _parse_count(item.quantity) if quantity is None else None
 
-        line_items.append(
-            LineItem(
-                receipt_id=receipt.id,
-                line_index=item.line_index,
-                raw_text=item.raw_text[:500],
-                normalized_text=normalise(item.raw_text)[:300],
-                normalizer_version=NORMALIZER_VERSION,
-                kind=_KIND_MAP.get(item.kind, LineItemKind.UNKNOWN),
-                price_cents=price_cents,
-                quantity=quantity.value if quantity else count,
-                unit=quantity.unit if quantity else None,
-                grams_as_purchased=grams,
-                grams_basis=basis,
-            )
+        normalized_text = normalise(item.raw_text)[:300]
+        carried = previous.get((item.line_index, normalized_text))
+
+        line = LineItem(
+            receipt_id=receipt.id,
+            line_index=item.line_index,
+            raw_text=item.raw_text[:500],
+            normalized_text=normalized_text,
+            normalizer_version=NORMALIZER_VERSION,
+            kind=_KIND_MAP.get(item.kind, LineItemKind.UNKNOWN),
+            price_cents=price_cents,
+            quantity=quantity.value if quantity else count,
+            unit=quantity.unit if quantity else None,
+            grams_as_purchased=grams,
+            grams_basis=basis,
         )
+
+        if carried is not None:
+            line.food_id = carried.food_id
+            line.resolution_source = carried.resolution_source
+            line.confidence = carried.confidence
+            line.resolved_at = carried.resolved_at
+            # A weight this stage derived is fresh evidence from the receipt
+            # and wins. Only when it derived none does an earlier estimate —
+            # from a correction's rule, or the resolver — carry over, since
+            # otherwise it would be lost and re-resolution would skip the line
+            # for already having an identity.
+            if grams is None and carried.grams_as_purchased is not None:
+                line.grams_as_purchased = carried.grams_as_purchased
+                line.grams_basis = carried.grams_basis
+                line.grams_edible = carried.grams_edible
+                line.edible_portion_pct_applied = carried.edible_portion_pct_applied
+
+        line_items.append(line)
 
     session.add_all(line_items)
 
@@ -211,6 +248,7 @@ async def normalize_receipt(session: AsyncSession, receipt: Receipt) -> Normaliz
         line_items=len(line_items),
         dropped=dropped,
         with_grams=with_grams,
+        resolution_carried=sum(1 for item in line_items if item.food_id is not None),
         unparseable_amounts=len(unparseable),
         normalizer_version=NORMALIZER_VERSION,
     )

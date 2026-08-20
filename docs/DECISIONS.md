@@ -610,3 +610,47 @@ Ground turkey is a different cut from turkey breast and differs sharply per
 the same shortlist as the chicken egg and scores comparably, so `chicken` stays
 required and that food stays in the review queue rather than silently becoming
 duck.
+
+---
+
+## D32 — Coverage is judged on spend and line count, never on weight · Settled
+
+`weight_share` stays in the payload but is out of the headline and out of
+`is_partial`. Both of those use spend and line count.
+
+**Why:** a line with no weight is absent from *both sides* of the weight ratio.
+The real Costco basket reported **"covers 100% of this basket's weight"** while
+four of its nine lines were never weighed at all — the two weighed lines were
+fully covered, so the ratio read perfectly. That is the one number this project
+cannot afford to have flatter itself.
+
+Spend is the only complete denominator: every line has a price. Line count is
+the other. Weight share still says something true about the mass that *was*
+measured, so it is kept, but it always travels with `lines_without_weight` and
+is never the number a reader meets first.
+
+**Rules out:** any single "coverage" figure. Two complete denominators plus
+three separate counts of what is missing, because a reader deciding whether to
+trust a protein total needs to know which kind of gap it has.
+
+---
+
+## D33 — Re-normalising carries resolution forward · Settled
+
+Normalisation replaces a receipt's line items wholesale. It now copies the
+resolution — food, source, confidence — onto any rebuilt line whose
+`(line_index, normalized_text)` is unchanged, along with a weight it could not
+derive itself.
+
+**Why:** re-normalising after something unrelated — a store fix, a normaliser
+change affecting other receipts — discarded every resolution on the receipt,
+and the next resolve silently re-paid for all of them. This was found by doing
+exactly that and watching a basket drop from full coverage to zero.
+
+**Rules out:** matching on line index alone. When the normaliser genuinely
+changes what a line reduces to, the old answer was about different text and has
+no claim on the new line, so nothing carries.
+
+**Consequence:** a weight derived fresh from the receipt still wins over a
+carried estimate — that stage is reading the paper, which outranks any earlier
+guess (D22).

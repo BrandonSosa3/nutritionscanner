@@ -285,3 +285,91 @@ async def test_the_costco_basket_reconciles_after_normalisation(
     assert receipt.subtotal_cents + receipt.tax_cents == receipt.total_cents == 8913
     assert receipt.subtotal_cents == parse_money_to_cents("85.61")
     assert receipt.total_cents == receipt.subtotal_cents + receipt.tax_cents
+
+
+# ── Re-normalising must not throw away paid work ──────────────────────────
+
+
+async def test_resolution_survives_a_re_normalise(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """The defect this fixes: re-normalising after an unrelated change — a
+    store fix, a normaliser tweak affecting other receipts — discarded every
+    resolution on the receipt, so the next resolve re-paid for all of them.
+    """
+    from ns.models.enums import ResolutionSource
+    from ns.pipeline.resolve import resolve_receipt
+    from tests.integration.test_resolve import patch_resolve
+
+    receipt = await _extracted(session, storage)
+    await normalize_receipt(session, receipt)
+    with patch_resolve(echo=True):
+        await resolve_receipt(session, receipt)
+
+    before = {
+        item.normalized_text: item.food_id
+        for item in await _items(session, receipt)
+        if item.food_id is not None
+    }
+    assert len(before) == 9
+
+    await normalize_receipt(session, receipt)
+
+    after = {
+        item.normalized_text: item.food_id
+        for item in await _items(session, receipt)
+        if item.food_id is not None
+    }
+    assert after == before
+    kept = next(i for i in await _items(session, receipt) if i.food_id is not None)
+    assert kept.resolution_source is ResolutionSource.LLM
+    assert kept.confidence is not None
+
+
+async def test_a_changed_normalisation_does_not_carry_an_answer_over(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """An answer about different text has no claim on the new line."""
+    from ns.pipeline.resolve import resolve_receipt
+    from tests.integration.test_resolve import patch_resolve
+
+    receipt = await _extracted(session, storage)
+    await normalize_receipt(session, receipt)
+    with patch_resolve(echo=True):
+        await resolve_receipt(session, receipt)
+
+    # Simulate a normaliser change by rewriting the stored raw text.
+    extraction = dict(receipt.raw_extraction or {})
+    items = [dict(item) for item in extraction["line_items"]]  # type: ignore[index,arg-type]
+    items[0]["raw_text"] = "SOMETHING COMPLETELY DIFFERENT"
+    extraction["line_items"] = items
+    receipt.raw_extraction = extraction
+    await session.flush()
+
+    await normalize_receipt(session, receipt)
+
+    changed = next(
+        i for i in await _items(session, receipt) if i.raw_text == "SOMETHING COMPLETELY DIFFERENT"
+    )
+    assert changed.food_id is None
+
+
+async def test_a_freshly_derived_weight_beats_a_carried_estimate(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """This stage reads the receipt, so what it derives is fresh evidence."""
+    from decimal import Decimal
+
+    receipt = await _extracted(session, storage)
+    await normalize_receipt(session, receipt)
+
+    weighed = next(i for i in await _items(session, receipt) if i.grams_as_purchased is not None)
+    weighed.grams_as_purchased = Decimal("1.000")
+    weighed.grams_basis = GramsBasis.PER_UNIT_ESTIMATE
+    await session.flush()
+
+    await normalize_receipt(session, receipt)
+
+    rebuilt = next(i for i in await _items(session, receipt) if i.line_index == weighed.line_index)
+    assert rebuilt.grams_as_purchased == Decimal("907.185")
+    assert rebuilt.grams_basis is GramsBasis.FROM_RECEIPT

@@ -74,7 +74,10 @@ export function Nutrition() {
         </p>
       </div>
 
-      {/* Coverage first. The caveat arrives with the number, never after it. */}
+      {/* Coverage first. The caveat arrives with the number, never after it.
+          Weight share is deliberately absent: unweighed lines are missing from
+          both sides of it, so it reads 100% on a basket where four of nine
+          lines were never weighed. Spend and line counts are complete. */}
       <Card accent={summary.coverage.is_partial ? "attention" : "resolved"}>
         <p className="text-body">{summary.headline}</p>
         {summary.coverage.is_partial && (

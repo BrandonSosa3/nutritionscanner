@@ -427,3 +427,67 @@ async def test_creating_a_food_that_exists_returns_the_existing_one(
 async def test_a_food_needs_a_name(client: AsyncClient) -> None:
     assert (await client.post("/foods", json={"canonical_name": "   "})).status_code == 422
     assert (await client.post("/foods", json={})).status_code == 422
+
+
+# ── The review queue's search ─────────────────────────────────────────────
+
+
+async def test_candidates_can_be_searched_in_usda_s_own_words(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """The recorded candidates all came from one search of our name. When the
+    right entry is not among them, the user has to be able to search in USDA's
+    vocabulary instead — `Egg, whole, raw` finds what `eggs, chicken` doesn't.
+    """
+    food = await make_food(session, "eggs, chicken, whole, raw")
+    await session.commit()
+
+    with patch.multiple(
+        "ns.api.routers.foods",
+        search_foods=AsyncMock(return_value=payload("search-chicken-breast")),
+    ):
+        response = await client.get(f"/foods/{food.id}/usda-candidates?q=chicken%20breast")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["queried"] == "chicken breast"
+    assert len(body["items"]) == 10
+
+
+async def test_rejected_candidates_come_back_with_their_reason(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A person can see that a cooked variant was excluded and decide for
+    themselves. Hiding the near-misses would make the matcher look arbitrary."""
+    food = await make_food(session, "chicken breast, boneless skinless, raw")
+    await session.commit()
+
+    with patch.multiple(
+        "ns.api.routers.foods",
+        search_foods=AsyncMock(return_value=payload("search-chicken-breast")),
+    ):
+        items = (await client.get(f"/foods/{food.id}/usda-candidates")).json()["items"]
+
+    rejected = [i for i in items if i["rejected_reason"]]
+    assert any("states disagree" in i["rejected_reason"] for i in rejected)
+    assert any("does not mention breast" in i["rejected_reason"] for i in rejected)
+    # Best first, so the one the matcher would have taken is at the top.
+    assert items[0]["fdc_id"] == 2646170
+
+
+async def test_searching_defaults_to_the_food_s_own_name(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    food = await make_food(session, "chicken breast, boneless skinless, raw")
+    await session.commit()
+
+    search = AsyncMock(return_value=payload("search-chicken-breast"))
+    with patch.multiple("ns.api.routers.foods", search_foods=search):
+        body = (await client.get(f"/foods/{food.id}/usda-candidates")).json()
+
+    assert body["queried"] == "chicken breast, boneless skinless, raw"
+    assert search.await_args.args[0] == "chicken breast, boneless skinless, raw"
+
+
+async def test_candidates_for_an_unknown_food_is_a_404(client: AsyncClient) -> None:
+    assert (await client.get("/foods/98765432/usda-candidates")).status_code == 404

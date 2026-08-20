@@ -480,3 +480,46 @@ async def test_an_unknown_nutrient_is_refused_with_the_known_list(
     response = await client.get("/summary/cost-per-nutrient?nutrient=vibes")
     assert response.status_code == 422
     assert "protein_g" in response.json()["detail"]
+
+
+async def test_weight_coverage_is_not_allowed_to_flatter_itself(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """The bug this guards: a basket where only one line was weighed reported
+    "100% of this basket's weight" while four lines went uncounted entirely.
+
+    Lines with no weight are absent from both sides of the weight ratio, so it
+    describes measured mass rather than the basket. The headline leads with
+    spend, and `is_partial` ignores weight for the same reason.
+    """
+    receipt = await a_receipt(session, storage)
+    known = await a_food(session, "the only weighed food", protein_per_100g="10")
+    await a_line(session, receipt, index=1, price_cents=100, food=known, grams="100")
+    await a_line(session, receipt, index=2, price_cents=900, food=known, grams=None)
+
+    coverage = (await summarise_receipts(session, [receipt])).coverage
+
+    # Every gram we know about is covered...
+    assert coverage.weight_share == 1.0
+    # ...but half the lines and 90% of the spend are not, and that is what the
+    # basket is judged on.
+    assert coverage.line_share == 0.5
+    assert coverage.spend_share == 0.1
+    assert coverage.is_partial
+    assert coverage.lines_without_weight == 1
+
+
+async def test_the_headline_leads_with_spend_not_weight(
+    client: AsyncClient, session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    receipt = await a_receipt(session, storage)
+    known = await a_food(session, "a headline food", protein_per_100g="10")
+    await a_line(session, receipt, index=1, price_cents=100, food=known, grams="100")
+    await a_line(session, receipt, index=2, price_cents=900, food=known, grams=None)
+    await session.commit()
+
+    headline = (await client.get(f"/summary?receipt_id={receipt.id}")).json()["headline"]
+
+    assert "10% of this basket's spend" in headline
+    assert "1 of 2 lines" in headline
+    assert "weight" not in headline.split("—")[0]

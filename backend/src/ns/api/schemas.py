@@ -352,15 +352,20 @@ class UsdaOverrideRequest(BaseModel):
 class CoverageOut(BaseModel):
     """How much of a basket a total accounts for.
 
-    Weight share is the honest denominator for a nutrient total; spend share
-    is the honest one for a cost. They differ, often sharply — an unresolved
-    bag of rice is a lot of weight and little money.
+    `spend_share` and `line_share` have complete denominators — every line has
+    a price, and every line is a line.
+
+    `weight_share` does not: lines with no weight are absent from both sides of
+    it, so it describes the mass that was measured rather than the basket. It
+    always travels with `lines_without_weight` so it cannot be read as the
+    whole.
     """
 
     lines_total: int
     lines_resolved: int
     lines_with_nutrition: int
     spend_share: float
+    line_share: float
     weight_share: float
     grams_total: str
     grams_with_nutrition: str
@@ -440,3 +445,16 @@ class FoodCreateRequest(BaseModel):
         description="Specific food name, as USDA would describe the ingredient.",
     )
     category: FoodCategory = FoodCategory.UNCATEGORIZED
+
+
+class UsdaCandidateListResponse(BaseModel):
+    """Candidates for a food, scored against its name but not saved.
+
+    Rejected ones are included with their reason: the automatic matcher is
+    strict on purpose, and a person can see that a candidate was excluded for
+    naming a different species and decide for themselves.
+    """
+
+    food_id: int
+    queried: str
+    items: list[UsdaCandidateOut]
