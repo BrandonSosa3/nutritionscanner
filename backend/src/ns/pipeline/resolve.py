@@ -195,7 +195,12 @@ async def _apply_correction(
             else ResolutionSource.CORRECTION_GLOBAL
         )
     )
-    apply_grams_rule(line, correction.grams_basis, correction.grams_value, food=food, override=True)
+    # `override=False` deliberately. A stored rule is a claim about what this
+    # food usually weighs; a weight printed on *this* receipt is a measurement
+    # of what was actually bought. Replaying "chicken breast comes in 1134 g
+    # packs" over a receipt that says 1360 g would substitute a fiction for a
+    # measurement, silently, on every future shop.
+    apply_grams_rule(line, correction.grams_basis, correction.grams_value, food=food)
 
     correction.applied_count += 1
     correction.last_applied_at = utcnow()

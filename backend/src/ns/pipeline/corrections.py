@@ -112,12 +112,20 @@ async def _record_example(
     return example
 
 
-async def _apply_everywhere(session: AsyncSession, correction: Correction) -> int:
+async def _apply_everywhere(
+    session: AsyncSession, correction: Correction, *, origin_line_id: int | None = None
+) -> int:
     """Replay a correction across every line it matches, past receipts included.
 
     A correction that only affected future receipts would leave the user's own
     history disagreeing with their own fix, and would make backfilled receipts
     (D18) permanently worse than new ones.
+
+    `origin_line_id` is the line the user was actually looking at. Only that
+    line's gram rule overrides a weight already parsed from its receipt —
+    saying "that 17KG is a bin code, not a weight" about a line in front of you
+    is a different act from replaying a rule onto receipts nobody is looking
+    at, where the printed weight is the better evidence.
     """
     conditions = [col(LineItem.normalized_text) == correction.normalized_text]
     if correction.store_id is not None:
@@ -153,7 +161,11 @@ async def _apply_everywhere(session: AsyncSession, correction: Correction) -> in
             )
         )
         apply_grams_rule(
-            line, correction.grams_basis, correction.grams_value, food=food, override=True
+            line,
+            correction.grams_basis,
+            correction.grams_value,
+            food=food,
+            override=line.id == origin_line_id,
         )
 
     correction.applied_count += len(lines)
@@ -200,7 +212,7 @@ async def record_correction(
     existing.grams_value = grams_value
     await session.flush()
 
-    applied = await _apply_everywhere(session, existing)
+    applied = await _apply_everywhere(session, existing, origin_line_id=line.id)
     example = await _record_example(
         session,
         line,

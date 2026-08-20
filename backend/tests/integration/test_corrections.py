@@ -416,3 +416,123 @@ async def test_the_correction_still_applies_after_re_normalisation(
     rebuilt = next(i for i in await lines_of(session, receipt) if i.normalized_text == text)
     assert rebuilt.food_id == food.id
     assert rebuilt.resolution_source is ResolutionSource.CORRECTION_STORE
+
+
+# ── A rule must not outrank a weight the receipt printed ──────────────────
+
+
+async def test_a_stored_rule_does_not_override_a_later_receipt_s_own_weight(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """The case that matters for anything sold by weight.
+
+    "Chicken breast comes in 1134 g packs" is a reasonable rule for a shop that
+    prints no weight. Next week's pack weighs 1360 g and the receipt says so —
+    and that printed figure is this purchase's actual weight. Replaying the
+    rule over it would silently substitute a fiction for a measurement on every
+    future receipt.
+    """
+    from decimal import Decimal
+
+    from ns.models.enums import GramsBasis
+    from ns.pipeline.resolve import resolve_receipt
+
+    receipt = await normalized_receipt(session, storage, color="white")
+    store = await store_of(session, receipt)
+    line = next(i for i in await lines_of(session, receipt) if i.kind is LineItemKind.PRODUCT)
+    food = await make_food(session, "chicken breast, for the weight rule")
+
+    await record_correction(
+        session,
+        line,
+        food_id=food.id,
+        grams_basis=GramsBasis.PER_PACKAGE,
+        grams_value=Decimal("1134"),
+        store_id=store.id,
+    )
+
+    # A later receipt whose own line states a weight.
+    later = await normalized_receipt(session, storage, color="black")
+    twin = next(
+        i for i in await lines_of(session, later) if i.normalized_text == line.normalized_text
+    )
+    twin.grams_as_purchased = Decimal("1360.000")
+    twin.grams_basis = GramsBasis.FROM_RECEIPT
+    await session.flush()
+
+    with patch_resolve():
+        await resolve_receipt(session, later)
+
+    resolved = next(i for i in await lines_of(session, later) if i.id == twin.id)
+    assert resolved.food_id == food.id  # the identity still applies
+    assert resolved.grams_as_purchased == Decimal("1360.000")  # the weight does not
+    assert resolved.grams_basis is GramsBasis.FROM_RECEIPT
+
+
+async def test_a_rule_still_fills_in_a_receipt_that_states_no_weight(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """The rule's whole purpose: fixed packages that receipts never weigh."""
+    from decimal import Decimal
+
+    from ns.models.enums import GramsBasis
+    from ns.pipeline.resolve import resolve_receipt
+
+    receipt = await normalized_receipt(session, storage, color="white")
+    store = await store_of(session, receipt)
+    line = next(
+        i
+        for i in await lines_of(session, receipt)
+        if i.kind is LineItemKind.PRODUCT and i.grams_as_purchased is None
+    )
+    food = await make_food(session, "a fixed-size package")
+
+    await record_correction(
+        session,
+        line,
+        food_id=food.id,
+        grams_basis=GramsBasis.PER_PACKAGE,
+        grams_value=Decimal("500"),
+        store_id=store.id,
+    )
+
+    later = await normalized_receipt(session, storage, color="black")
+    with patch_resolve():
+        await resolve_receipt(session, later)
+
+    twin = next(
+        i for i in await lines_of(session, later) if i.normalized_text == line.normalized_text
+    )
+    assert twin.grams_as_purchased == Decimal("500.000")
+    assert twin.grams_basis is GramsBasis.PER_PACKAGE
+
+
+async def test_correcting_a_line_directly_does_override_its_parsed_weight(
+    session: AsyncSession, storage: LocalReceiptStorage
+) -> None:
+    """`BANANAS LOOSE 17KG` is a bin code, not a weight. Looking straight at a
+    line and saying so has to win — that is a different act from replaying a
+    rule onto a receipt nobody is looking at."""
+    from decimal import Decimal
+
+    from ns.models.enums import GramsBasis
+
+    receipt = await normalized_receipt(session, storage)
+    store = await store_of(session, receipt)
+    line = next(
+        i for i in await lines_of(session, receipt) if i.grams_basis is GramsBasis.FROM_RECEIPT
+    )
+    food = await make_food(session, "a misread package size")
+
+    await record_correction(
+        session,
+        line,
+        food_id=food.id,
+        grams_basis=GramsBasis.PER_PACKAGE,
+        grams_value=Decimal("596"),
+        store_id=store.id,
+    )
+
+    fixed = await session.get(LineItem, line.id)
+    assert fixed is not None
+    assert fixed.grams_as_purchased == Decimal("596.000")

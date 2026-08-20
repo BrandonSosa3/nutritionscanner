@@ -654,3 +654,33 @@ no claim on the new line, so nothing carries.
 **Consequence:** a weight derived fresh from the receipt still wins over a
 carried estimate — that stage is reading the paper, which outranks any earlier
 guess (D22).
+
+---
+
+## D34 — A stored rule never outranks a weight the receipt printed · Settled
+
+Amends D22. Authority is:
+
+1. The line the user is **directly correcting** — they are looking at it
+2. A weight **this receipt printed**
+3. A stored rule, replayed from a correction
+4. A resolver estimate
+
+The correction path passes `override` only for the originating line. Tier 1 of
+resolution never does.
+
+**Why:** "chicken breast comes in 1134 g packs" is a fair rule for a store that
+prints no weight. Next week's pack weighs 1360 g and the receipt says so — that
+printed figure is a measurement of what was actually bought, and the rule is a
+claim about what the food usually weighs. Replaying the rule over it
+substituted a fiction for a measurement, silently, on every future shop.
+
+D22 gave corrections a blanket override so `BANANAS LOOSE 17KG` — a bin code
+misread as a weight — could be fixed. That is still true, and is why the
+originating line keeps its override: saying "that is not a weight" about a line
+in front of you is a different act from replaying a rule onto receipts nobody
+is looking at.
+
+**Consequence:** rules are for items a receipt never weighs — fixed packages.
+Anything sold by weight prints its weight, so it needs no rule and cannot be
+damaged by one.
